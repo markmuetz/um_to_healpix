@@ -9,6 +9,8 @@ The recommended way to install is by cloning the git repo, creating a conda env,
 ## Setup/activate conda env
 * `conda env create -f envs/um2hp_env.yml`
 * `conda activate um2hp_env`
+* Make the conda env usable in https://notebooks.jasmin.ac.uk/
+* `python -m ipykernel install --user --name um2hp_env`
 
 ## Pip install
 * `pip install -e .`
