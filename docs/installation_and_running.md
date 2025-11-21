@@ -20,7 +20,7 @@ The recommended way to install is by cloning the git repo, creating a conda env,
 * `um_to_healpix --help`
 
 # Running
-Assumes that you are doing this on JASMIN.
+Assumes that you are doing this on JASMIN, and that you have access to the `hrcm` (high-resolution climate modelling) GWS.
 
 * First, decide which simulation to process.
   * `um_to_healpix ls`
