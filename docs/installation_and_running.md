@@ -55,3 +55,10 @@ CTC_km4p4_CoMA9_TBv1.n1280_GAL9_nest
   * To force a specific job to rerun, just delete the done file
   * To force *all* jobs to rerun, edit config as above
   * Output will be put in the `slurm/output/` directory
+
+# View output
+
+* Go to https://notebooks.jasmin.ac.uk/
+* Navigate to the `/um_to_healpix/ctrl/notebooks` directory
+* Open the `view_UM_healpix_on_JASMIN_obj_store.ipynb` notebook
+* Try running it.
