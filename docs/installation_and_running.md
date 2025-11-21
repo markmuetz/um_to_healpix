@@ -20,7 +20,7 @@ The recommended way to install is by cloning the git repo, creating a conda env,
 * `um_to_healpix --help`
 
 # Running
-Assumes that you are doing this on JASMIN, and that you have access to the `hrcm` (high-resolution climate modelling) GWS.
+Assumes that you are doing this on JASMIN, and that you have access to the `kscale` and `hrcm` (high-resolution climate modelling) GWSs.
 
 * First, decide which simulation to process.
   * `um_to_healpix ls`
@@ -41,6 +41,7 @@ CTC_km4p4_CoMA9_TBv1.n1280_GAL9_nest
   * Edit `output_vn` and `deploy`
   * Changing either will force new processing (by using a different done file path)
   * It will also determine where the output is put in the JASMIN object store
+  * You will need to edit the `weightsdir` and `donedir` to directories where you have write access.
 * You can view all config for a simulation:
   * `um_slurm_control print-config glm.n1280_CoMA9`
 * Set up a SLURM monitoring script on JASMIN to see progress
