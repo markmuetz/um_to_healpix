@@ -15,8 +15,14 @@ import pandas as pd
 
 from .cube_to_da_mapping import MapItem, MultiMapItem
 
-output_vn = 'v5.3'
+# Global config.
+output_vn = 'v5.4'
 deploy = 'dev'
+# Location of input files.
+dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
+weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
+# Location of donefiles. Delete to rerun a particular task.
+donedir = Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}')
 
 # Defaults - can be overridden.
 slurm_config = dict(
@@ -320,9 +326,9 @@ global_configs = {
         'name': key,
         'regional': False,
         'add_cyclic': True,
-        'basedir': Path(f'/gws/nopw/j04/kscale/DYAMOND3_data/{simdir}/glm'),
-        'weightsdir': Path('/gws/nopw/j04/hrcm/mmuetz/weights/'),
-        'donedir': Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}'),
+        'basedir': dy3dir / f'{simdir}/glm',
+        'weightsdir': weightsdir,
+        'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
         'first_date': pd.Timestamp(2020, 1, 20, 0),
         'max_zoom': 10 if key.startswith('glm.n2560') else 9,
@@ -395,9 +401,9 @@ regional_configs = {
         # Orig: I think this should be true for CTC, but it's raising an error: ValueError: The coordinate must be equally spaced.
         # 'add_cyclic': key.startswith('CTC'),  # only difference from regional.
         'add_cyclic': False,
-        'basedir': map_regional_key_to_path(simdir, key),
-        'weightsdir': Path('/gws/nopw/j04/hrcm/mmuetz/weights/'),
-        'donedir': Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}'),
+        'basedir': dy3dir / f'{simdir}/glm',
+        'weightsdir': weightsdir,
+        'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
         'max_zoom': 10,
         'first_date': pd.Timestamp(2020, 1, 20, 0),
