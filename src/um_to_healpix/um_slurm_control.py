@@ -195,6 +195,7 @@ def process(ctx, config_key):
     for date in dates_to_paths:
         # TODO:!!
         if date > pd.Timestamp('2020-02-01 00:00'):
+            logger.error('DO NOT LEAVE IN: Limiting date range to 2020-02-01')
             break
         if date == config['first_date']:
             create_donepath = donedir / donepath_tpl.format(task='create_empty_zarr_store', date=date)
