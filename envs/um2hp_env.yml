@@ -1,0 +1,41 @@
+# Minimal env with no versions specified apart from python=3.12
+name: um2hp_env
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - aiohttp
+  - botocore
+  - cartopy
+  - cf-units
+  - cf_xarray
+  - dask
+  - distributed
+  - esmf
+  - esmpy
+  - healpy
+  - intake
+  - ipdb
+  - ipython
+  - iris
+  - jupyter
+  - jupyterlab
+  - loguru
+  - matplotlib
+  - metpy
+  - mo_pack
+  - numpy
+  - pandas
+  - pip
+  - python=3.12
+  - python-stratify
+  - s3fs
+  - scipy
+  - xarray
+  - xesmf
+  - xgcm
+  - zarr
+# Do these have to be installed using pip?
+  - pip:
+    - easygems
+

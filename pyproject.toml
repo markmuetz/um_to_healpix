@@ -33,7 +33,8 @@ dependencies = [
     "dask",
     "easygems",
     "healpix",
-    "iris",
+    # There is a problem with iris being installed twice on `pip install -e .`
+    # "iris",
     "loguru",
     "numpy",
     "pandas",
