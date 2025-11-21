@@ -537,7 +537,7 @@ def slurm_run(tasks, array_index):
     return proc
 
 
-if __name__ == '__main__':
+def main():
     logger.remove()
     custom_fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
                   "<level>{level: <8}</level> | "

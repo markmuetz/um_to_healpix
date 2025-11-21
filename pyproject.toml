@@ -14,7 +14,7 @@ authors = [
 maintainers = [
     { name = "Mark Muetzelfeldt", email = "mark.muetzelfeldt@reading.ac.uk" },
 ]
-requires-python = ">=3.10"
+requires-python = ">=3.12"
 license = "BSD-3-Clause"
 license-files = ['LICENSE']
 readme = "README.md"
@@ -45,6 +45,7 @@ dependencies = [
 
 [project.scripts]
 um_slurm_control = "um_to_healpix.um_slurm_control:cli"
+um_process_tasks = "um_to_healpix.um_process_tasks:main"
 
 [project.urls]
 Homepage = "https://github.com/markmuetz/um_to_healpix"

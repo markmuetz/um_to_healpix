@@ -48,7 +48,7 @@ fi
 
 ARRAY_INDEX=${{SLURM_ARRAY_TASK_ID}}
 
-python um_process_tasks.py slurm {tasks_path} ${{ARRAY_INDEX}}
+um_process_tasks slurm {tasks_path} ${{ARRAY_INDEX}}
 """
 
 def sbatch(slurm_script_path):
