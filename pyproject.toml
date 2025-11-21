@@ -1,0 +1,50 @@
+# Required to make this package install correctly with `pip install -e .`
+# https://github.com/pypa/pip/issues/11457
+[build-system]
+requires = ["setuptools >= 64"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "um_to_healpix"
+version = "0.1"
+description = "Tools for converting Unified Model output to healpix"
+authors = [
+    { name = "Mark Muetzelfeldt", email = "mark.muetzelfeldt@reading.ac.uk" },
+]
+maintainers = [
+    { name = "Mark Muetzelfeldt", email = "mark.muetzelfeldt@reading.ac.uk" },
+]
+requires-python = ">=3.10"
+license = "BSD-3-Clause"
+license-files = ['LICENSE']
+readme = "README.md"
+keywords = ["Unified Model", "healpix"]
+classifiers = [
+    "Environment :: Console",
+    "Intended Audience :: Science/Research",
+    "Natural Language :: English",
+    "Operating System :: POSIX :: Linux",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Atmospheric Science"
+]
+dependencies = [
+    "cartopy",
+    "click",
+    "dask",
+    "easygems",
+    "healpix",
+    "iris",
+    "loguru",
+    "numpy",
+    "pandas",
+    "s3fs",
+    "stratify",
+    "xarray",
+]
+
+[project.scripts]
+um_slurm_control = "um_to_healpix.um_slurm_control:cli"
+
+[project.urls]
+Homepage = "https://github.com/markmuetz/um_to_healpix"
+
