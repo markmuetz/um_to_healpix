@@ -16,14 +16,14 @@ The recommended way to install is by cloning the git repo, creating a conda env,
 * `pip install -e .`
 
 ## Test
-* This should have installed the `um_to_healpix` package which has a CLI entry point
-* `um_to_healpix --help`
+* This should have installed the `um_slurm_control` package which has a CLI entry point
+* `um_slurm_control --help`
 
 # Running
 Assumes that you are doing this on JASMIN, and that you have access to the `kscale` and `hrcm` (high-resolution climate modelling) GWSs.
 
 * First, decide which simulation to process.
-  * `um_to_healpix ls`
+  * `um_slurm_control ls`
   * Currently
     * `glm.n1280_CoMA9
 glm.n2560_RAL3p3
