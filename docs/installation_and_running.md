@@ -15,12 +15,43 @@ The recommended way to install is by cloning the git repo, creating a conda env,
 ## Pip install
 * `pip install -e .`
 
-## Test
+## Test processing command
 * This should have installed the `um_slurm_control` package which has a CLI entry point
 * `um_slurm_control --help`
 
-# Running
-Assumes that you are doing this on JASMIN, and that you have access to the `kscale` and `hrcm` (high-resolution climate modelling) GWSs.
+## Access to JASMIN GWSs
+* You will need access to the `kscale` and `hrcm` GWSs
+  * Find these and apply here: https://accounts.jasmin.ac.uk/services/group_workspaces/
+
+## Access to JASMIN Object Store
+* For info on the object store, look here: https://help.jasmin.ac.uk/docs/short-term-project-storage/using-the-jasmin-object-store/
+* You will need access to the `hackathon-o` tenancy in the JASMIN object store
+  * Find this and apply here: https://accounts.jasmin.ac.uk/services/object_store/
+* Once you have access, you need to create an access key:
+  * (See here: https://help.jasmin.ac.uk/docs/short-term-project-storage/using-the-jasmin-object-store/#using-s3cmd)
+  * Go to https://s3-portal.jasmin.ac.uk/object-store
+  * Click "Manage Object Store"
+  * Click "Create Key" tab
+  * Add a description like "wcrp_hackathon"
+  * **Take note of the S3 Secret Key -- you will not be able to see it again!**
+  * Use this info to make a file in your home dir on JASMIN `.s3cfg` (filling in the blanks):
+```
+access_key = <access-key>
+host_base = hackathon-o.s3.jc.rl.ac.uk
+host_bucket = hackathon-o.s3.jc.rl.ac.uk
+secret_key = <secret-key>
+use_https = False
+signature_v2 = False
+```
+
+## Test access to JASMIN Object Store using `s3cmd`
+* With `~/.s3cfg` set up, on JASMIN you *should* be able to:
+  * `s3cmd ls s3://sim-data/`
+  * `s3cmd ls s3://sim-data/dev/v5.2/glm.n2560_RAL3p3/um.PT1H.hp_z10.zarr/`
+* And see nice output. See here for more info on `s3cmd`: https://help.jasmin.ac.uk/docs/short-term-project-storage/using-the-jasmin-object-store/#using-s3cmd
+
+# Running processing
+Assumes that you are doing this on JASMIN, and that you have access to the `kscale` and `hrcm` (high-resolution climate modelling) GWSs, with access to the `hackathon-o` object store tenancy set up as above.
 
 * First, decide which simulation to process.
   * `um_slurm_control ls`
