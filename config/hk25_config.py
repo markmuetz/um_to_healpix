@@ -13,7 +13,7 @@ import iris
 import iris.cube
 import pandas as pd
 
-from .cube_to_da_mapping import MapItem, MultiMapItem
+from um_to_healpix.cube_to_da_mapping import MapItem, MultiMapItem
 
 # Global config.
 output_vn = 'v5.4'

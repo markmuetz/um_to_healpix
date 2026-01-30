@@ -31,11 +31,10 @@ import s3fs
 import xarray as xr
 from loguru import logger
 
-from .um_processing_config import processing_config, shared_metadata
 from .cube_to_da_mapping import DataArrayExtractor
 from .healpix_coarsen import coarsen_healpix_zarr_region, async_da_to_zarr_with_retries
 from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited_healpix
-from .util import async_da_to_zarr_with_retries
+from .util import async_da_to_zarr_with_retries, load_config
 
 # Super simple .s3cfg parser - must be in home directory.
 s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
@@ -170,8 +169,9 @@ def get_regional_bounds(da):
 
 
 class UMProcessTasks:
-    def __init__(self, config):
+    def __init__(self, config, shared_metadata):
         self.config = config
+        self.shared_metadata = shared_metadata
         self.drop_vars = config['drop_vars']
         self.groups = config['groups']
 
@@ -188,7 +188,7 @@ class UMProcessTasks:
                 'regional': regional,
             },
             **self.config['metadata'],
-            **shared_metadata,
+            **self.shared_metadata,
         }
 
         if not regional:
@@ -517,7 +517,10 @@ def slurm_run(tasks, array_index):
     start = timer()
     task = tasks[array_index]
     logger.debug(task)
-    proc = UMProcessTasks(processing_config[task['config_key']])
+    config_path = Path(task['config_path'])
+    config = load_config(config_path)
+
+    proc = UMProcessTasks(config.processing_config[task['config_key']], config.shared_metadata)
     if task['task_type'] == 'regrid':
         proc.regrid(task)
     elif task['task_type'] == 'create_empty_zarr_stores':

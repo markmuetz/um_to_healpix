@@ -1,7 +1,10 @@
+import importlib.util
+import sys
 from functools import partial
 import asyncio
 import random
 import subprocess as sp
+from pathlib import Path
 
 import botocore.exceptions
 import iris
@@ -98,4 +101,20 @@ def sysrun(cmd):
     return sp.run(cmd, check=True, shell=True, stdout=sp.PIPE, stderr=sp.PIPE, encoding='utf8')
 
 
+def load_config(file_path):
+    path = Path(file_path)
+    module_name = path.stem  # Use filename without extension
 
+    # 1. Create the spec
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+
+    # 2. Create a new module based on the spec
+    config_module = importlib.util.module_from_spec(spec)
+
+    # 3. Add to sys.modules (optional but recommended for imports)
+    sys.modules[module_name] = config_module
+
+    # 4. Execute the module to populate it
+    spec.loader.exec_module(config_module)
+
+    return config_module
