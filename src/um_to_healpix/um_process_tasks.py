@@ -406,7 +406,7 @@ class UMProcessTasks:
             s3=get_jasmin_s3(), check=False)
         logger.debug(store_url)
         logger.debug(ds_tpl)
-        ds_tpl.to_zarr(zarr_store, mode='w', compute=False)
+        ds_tpl.to_zarr(zarr_store, mode='w', compute=False, zarr_format=2, consolidated=True)
 
     def regrid(self, task):
         """Regrid all variables from lat/lon to healpix.

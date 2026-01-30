@@ -16,7 +16,7 @@ import pandas as pd
 from um_to_healpix.cube_to_da_mapping import MapItem, MultiMapItem
 
 # Global config.
-output_vn = 'v6.0'
+output_vn = 'v6.1'
 deploy = 'dev'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
