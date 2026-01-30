@@ -118,3 +118,16 @@ def load_config(file_path):
     spec.loader.exec_module(config_module)
 
     return config_module
+
+
+def exception_info(ex_type, value, tb):
+    """Drop user into a debug shell on exception."""
+    import traceback
+
+    traceback.print_exception(ex_type, value, tb)
+    try:
+        # Might not be installed.
+        import ipdb as debug
+    except ImportError:
+        import pdb as debug
+    debug.pm()

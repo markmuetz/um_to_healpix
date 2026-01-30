@@ -18,7 +18,7 @@ import pandas as pd
 from loguru import logger
 
 from .cube_to_da_mapping import DataArrayExtractor
-from .util import sysrun, load_config
+from .util import sysrun, load_config, exception_info
 
 # SLURB script template - filled in and written to a file for calling with `sbatch`.
 SLURM_SCRIPT_ARRAY = """#!/bin/bash
@@ -63,7 +63,10 @@ def sbatch(slurm_script_path):
 
 def _parse_date_from_pp_path(path):
     datestr = path.stem.split('.')[-1].split('_')[1]
-    return pd.to_datetime(datestr, format="%Y%m%dT%H")
+    if datestr[-1] == 'Z':
+        return pd.to_datetime(datestr, format="%Y%m%dT%H%MZ")
+    else:
+        return pd.to_datetime(datestr, format="%Y%m%dT%H")
 
 
 def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, **kwargs):
@@ -136,11 +139,12 @@ def write_jobids(jobids):
 @click.group()
 @click.option('--config', '-C', default=Path('config/hk25_config.py'), type=Path)
 @click.option('--dry-run', '-n', is_flag=True)
+@click.option('--debug-exception', '-X', is_flag=True)
 @click.option('--debug', '-D', is_flag=True)
 @click.option('--trace', '-T', is_flag=True)
 @click.option('--nconcurrent-tasks', '-N', default=40, type=int)
 @click.pass_context
-def cli(ctx, config, dry_run, debug, trace, nconcurrent_tasks):
+def cli(ctx, config, dry_run, debug_exception, debug, trace, nconcurrent_tasks):
     ctx.ensure_object(dict)
     ctx.obj['config_path'] = str(config)
     ctx.obj['config'] = load_config(config)
@@ -157,6 +161,10 @@ def cli(ctx, config, dry_run, debug, trace, nconcurrent_tasks):
     if dry_run:
         logger.warning("Dry run: not launching any jobs")
 
+    if debug_exception:
+        # Handle top level exceptions with a debugger.
+        sys.excepthook = exception_info
+
     for path in ['slurm/tasks', 'slurm/scripts', 'slurm/output', 'slurm/jobids/']:
         path = Path(path)
         if not path.exists():
@@ -172,9 +180,10 @@ def cli_exit(ctx, result, **kwargs):
 
 
 @cli.command()
+@click.option('--end-time', '-E', type=pd.Timestamp, default=pd.Timestamp('2022-01-01 00:00'))
 @click.argument('config_key')
 @click.pass_context
-def process(ctx, config_key):
+def process(ctx, end_time, config_key):
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
 
     logger.debug(f'using {nconcurrent_tasks} concurrent tasks')
@@ -196,9 +205,8 @@ def process(ctx, config_key):
     # Build a list of tasks for all donepaths that don't exist.
     tasks = []
     for date in dates_to_paths:
-        # TODO:!!
-        if date > pd.Timestamp('2020-02-01 00:00'):
-            logger.error('DO NOT LEAVE IN: Limiting date range to 2020-02-01')
+        if date > end_time:
+            logger.warning(f'Limiting date range to {end_time}')
             break
         if date == config['first_date']:
             create_donepath = donedir / donepath_tpl.format(task='create_empty_zarr_store', date=date)
@@ -208,7 +216,7 @@ def process(ctx, config_key):
                 logger.info('Creating zarr store')
                 create_task = {
                     'task_type': 'create_empty_zarr_stores',
-                    'config_path': ctx.obj['config'].config_path,
+                    'config_path': ctx.obj['config_path'],
                     'config_key': config_key,
                     'date': str(date),
                     'inpaths': [str(p) for p in dates_to_paths[date]],
@@ -222,6 +230,8 @@ def process(ctx, config_key):
                     create_jobid = sbatch(slurm_script_path)
                     logger.info(f'create empty zarr stores jobid: {create_jobid}')
                     jobids.append(create_jobid)
+            else:
+                logger.debug('zarr store already created')
 
         donepath = (donedir / donepath_tpl.format(task='regrid', date=date))
         donepath.parent.mkdir(parents=True, exist_ok=True)
@@ -233,7 +243,7 @@ def process(ctx, config_key):
             tasks.append(
                 {
                     'task_type': 'regrid',
-                    'config_path': ctx.obj['config'].config_path,
+                    'config_path': ctx.obj['config_path'],
                     'config_key': config_key,
                     'date': str(date),
                     'inpaths': [str(p) for p in dates_to_paths[date]],
@@ -310,7 +320,7 @@ def coarsen(ctx, nbatch, endtime, config_key):
                 tasks.append(
                     {
                         'task_type': 'coarsen',
-                        'config_path': ctx.obj['config'].config_path,
+                        'config_path': ctx.obj['config_path'],
                         'config_key': config_key,
                         'tgt_zoom': zoom,
                         'dim': dim,

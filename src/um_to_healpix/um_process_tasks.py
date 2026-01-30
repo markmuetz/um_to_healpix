@@ -34,7 +34,7 @@ from loguru import logger
 from .cube_to_da_mapping import DataArrayExtractor
 from .healpix_coarsen import coarsen_healpix_zarr_region, async_da_to_zarr_with_retries
 from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited_healpix
-from .util import async_da_to_zarr_with_retries, load_config
+from .util import async_da_to_zarr_with_retries, load_config, exception_info
 
 # Super simple .s3cfg parser - must be in home directory.
 s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
@@ -209,14 +209,22 @@ class UMProcessTasks:
         logger.info(f'Found {len(group_cubes)} cubes for {group_name}')
 
         list_da = []
+        missing_map_items = []
         extractor = DataArrayExtractor(None, None)
         for key, map_item in name_map.items():
             short_name, long_name = key
-            cubes = extractor.extract_cubes(map_item, group_cubes)
+            try:
+                cubes = extractor.extract_cubes(map_item, group_cubes)
+            except iris.exceptions.ConstraintMismatchError:
+                missing_map_items.append(map_item)
+
             # Just use first cube here.
             da = xr.DataArray.from_iris(cubes[0]).rename(short_name)
             da.attrs['long_name'] = long_name
             list_da.append(da)
+
+        if missing_map_items:
+            raise Exception('MISSING: \n' + '\n'.join('* ' + str(m) for m in missing_map_items))
 
         return list_da
 
@@ -231,6 +239,7 @@ class UMProcessTasks:
         regional = config.get('regional', False)
         zarr_store_url_tpl = config['zarr_store_url_tpl']
 
+        apa_filname = config.get()
         cubes = iris.load(basedir / f'field.pp/apa.pp/{config["name"]}.apa_20200120T00.pp')
         land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask'))
         orog = xr.DataArray.from_iris(cubes.extract_cube('surface_altitude'))
@@ -345,7 +354,9 @@ class UMProcessTasks:
             for group_name, group in self.config['groups'].items()
         }
 
-        if not regional:
+        add_orog = not regional and False
+
+        if add_orog:
             # TODO: handle regional.
             orog_land_sea = self._gen_orog_land_sea()
 
@@ -370,7 +381,7 @@ class UMProcessTasks:
                             metadata['bounds'] = get_regional_bounds(da)
                             logger.debug('bounds={}'.format(metadata['bounds']))
                     ds_tpls[zarr_store_name][da_tpl.name] = da_tpl
-                    if not regional:
+                    if add_orog:
                         ds_tpls[zarr_store_name]['orog'] = orog_land_sea[zoom].orog
                         ds_tpls[zarr_store_name]['sftlf'] = orog_land_sea[zoom].sftlf
 
@@ -551,6 +562,8 @@ def main():
                                                                dt.datetime.fromtimestamp(filepath.stat().st_mtime)))
 
     logger.debug(' '.join(sys.argv))
+    if len(sys.argv) == 5 and sys.argv[4] == 'debug_exc':
+        sys.excepthook = exception_info
 
     if sys.argv[1] == 'slurm':
         tasks_path = sys.argv[2]

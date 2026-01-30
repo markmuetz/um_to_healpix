@@ -16,10 +16,10 @@ import pandas as pd
 from um_to_healpix.cube_to_da_mapping import MapItem, MultiMapItem
 
 # Global config.
-output_vn = 'v6'
+output_vn = 'v6.0'
 deploy = 'dev'
 # Location of input files.
-dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
+dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
 weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
 # Location of donefiles. Delete to rerun a particular task.
 donedir = Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}')
@@ -158,8 +158,9 @@ name_map_2d = {
     ('tas', 'air_temperature'): MapItem('air_temperature'),
     ('psl', 'air_pressure_at_mean_sea_level'): MapItem('air_pressure_at_sea_level'),
     ('tas', 'air_temperature'): MapItem('air_temperature'),
-    ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('atmosphere_cloud_liquid_water_content'),
-    ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('atmosphere_cloud_ice_content'),
+    # TODO: Why are these two missing? Can I replace them?
+    # ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('atmosphere_cloud_liquid_water_content'),
+    # ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('atmosphere_cloud_ice_content'),
     ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461'),
     ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap'),
     ('uas', 'eastward_wind'): MapItem('x_wind'),
@@ -268,7 +269,7 @@ group3d_ml = {
 # ./5km-RAL3/glm/field.pp/apvera.pp/glm.n2560_RAL3p3.apvera_20200120T00.pp
 # ./10km-GAL9-nest/glm/field.pp/apvera.pp/glm.n1280_GAL9_nest.apvera_20200120T00.pp
 global_sim_keys = {
-    'glm.n2560_RAL3p3': '5km-RAL3',
+    'glm.n2560_RAL3p3.tuned': '5km-RAL3p3-tuned',
     # 'glm.n1280_CoMA9': '10km-CoMA9',
     # 'glm.n1280_GAL9_nest': '10km-GAL9-nest',
 }
@@ -346,7 +347,7 @@ global_configs = {
     for key, simdir in global_sim_keys.items()
 }
 
-global_configs['glm.n2560_RAL3p3']['metadata'].update({
+global_configs['glm.n2560_RAL3p3.tuned']['metadata'].update({
     'simulation_description': ('The MetUM uses a regular lat-lon grid, for our explicit convection global simulations '
                                'we use the N2560 global grid (~5 km in mid-latitudes) and the latest regional '
                                'atmosphere-land configuration (RAL3p3). As detailed in Bush et al 2025 the RAL3p3 '
