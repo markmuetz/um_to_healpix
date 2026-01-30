@@ -17,6 +17,15 @@ def run_parse_cmd(jobids_str):
     df['maxrss'] = df['maxrss'].map(map_maxrss) / 1e9
     df["elapsed"] = pd.to_timedelta(df["elapsed"])
 
+    # TODO: would be good to display info on pending tasks too.
+    # cmd2 = rf'squeue --me --format="%20i" --state=PD -r -h'
+    # result2 = sp.run(cmd2, capture_output=True, text=True, shell=True)
+    # lines2 = [l for l in result2.stdout.split('\n') if l]
+    # data2 = [[v.strip() for v in line.split('|')] for line in lines2]
+    # breakpoint()
+    # df2 = pd.DataFrame(data2, columns=["jobid"])
+    # print(df2)
+
     return df
 
 
