@@ -34,7 +34,8 @@ dependencies = [
     "easygems",
     "healpix",
     # There is a problem with iris being installed twice on `pip install -e .`
-    # "iris",
+    # Shifting to scitools-iris should fix this.
+    "scitools-iris",
     "loguru",
     "numpy",
     "pandas",
@@ -44,9 +45,12 @@ dependencies = [
 ]
 
 [project.scripts]
-um_slurm_control = "um_to_healpix.um_slurm_control:cli"
-um_process_tasks = "um_to_healpix.um_process_tasks:main"
+um-slurm-control = "um_to_healpix.um_slurm_control:cli"
+um-process-tasks = "um_to_healpix.um_process_tasks:main"
+um-parse-slurm = "um_to_healpix.um_parse_slurm:main"
 
 [project.urls]
 Homepage = "https://github.com/markmuetz/um_to_healpix"
 
+[tool.setuptools.packages.find]
+where = ["src"]
