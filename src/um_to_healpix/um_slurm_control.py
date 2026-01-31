@@ -34,7 +34,10 @@ SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH -o slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.out
 #SBATCH -e slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.err
 #SBATCH --comment={comment}
+#SBATCH --exclude=host1210,host1211,host1212
 {dependency}
+
+# host1211 and host1212 are silently failing :(.
 
 # These nodes repeatedly fail to be able to read the kscale GWS.
 # Apparently these have been fixed:
