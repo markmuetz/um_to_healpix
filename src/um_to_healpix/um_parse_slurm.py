@@ -1,5 +1,5 @@
+from pathlib import Path
 import subprocess as sp
-import sys
 
 import click
 import pandas as pd
@@ -90,9 +90,17 @@ def print_df(df, full):
         print(f'Est. finished time: {pd.Timestamp.now() + est_finish_duration}')
 
 
+def view_logs(df):
+    jobids = [list(Path.cwd().glob('slurm/output/*' + j[:-6] + '*.err'))[0] for j in df.jobid.values.tolist()]
+    sp.run(['vim'] + jobids)
+
+
 @click.command
 @click.option('--full', '-F', is_flag=True)
+@click.option('--interactive', '-I', is_flag=True)
 @click.argument('jobids_str')
-def main(full, jobids_str):
+def main(full, interactive, jobids_str):
     df = run_parse_cmd(jobids_str)
     print_df(df, full)
+    if interactive:
+        breakpoint()
