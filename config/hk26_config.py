@@ -31,6 +31,7 @@ slurm_config = dict(
     cpus_per_task=1,
     partition='standard',
     qos='standard',
+    time='24:00:00',
     mem=100000,
     nconcurrent_tasks=40,
 )

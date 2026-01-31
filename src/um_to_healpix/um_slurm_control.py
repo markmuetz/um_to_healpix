@@ -23,7 +23,7 @@ from .util import sysrun, load_config, exception_info
 # SLURB script template - filled in and written to a file for calling with `sbatch`.
 SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH --job-name="{job_name}"
-#SBATCH --time=10:00:00
+#SBATCH --time={time}
 #SBATCH --mem={mem}
 #SBATCH --account={account}
 #SBATCH --ntasks={ntasks}
