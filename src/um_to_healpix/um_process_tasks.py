@@ -221,6 +221,7 @@ class UMProcessTasks:
             # Just use first cube here.
             da = xr.DataArray.from_iris(cubes[0]).rename(short_name)
             da.attrs['long_name'] = long_name
+            da.attrs.update(map_item.extra_attrs)
             list_da.append(da)
 
         if missing_map_items:
@@ -532,10 +533,10 @@ def slurm_run(tasks, array_index):
     config = load_config(config_path)
 
     proc = UMProcessTasks(config.processing_config[task['config_key']], config.shared_metadata)
-    if task['task_type'] == 'regrid':
-        proc.regrid(task)
-    elif task['task_type'] == 'create_empty_zarr_stores':
+    if task['task_type'] == 'create_empty_zarr_stores':
         proc.create_empty_zarr_stores(task)
+    elif task['task_type'] == 'regrid':
+        proc.regrid(task)
     elif task['task_type'] == 'coarsen':
         proc.coarsen_healpix_region(task)
     else:
