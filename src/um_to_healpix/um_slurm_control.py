@@ -34,7 +34,7 @@ SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH -o slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.out
 #SBATCH -e slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.err
 #SBATCH --comment={comment}
-#SBATCH --exclude=host1210,host1211,host1212,host1226,host1227,host1228
+#SBATCH --exclude=host1210,host1211,host1212,host1226,host1227,host1228,host1247,host1248,host1249,host1250
 {dependency}
 
 # host1210-2, host1226-8 are silently failing :(.
@@ -62,15 +62,6 @@ def sbatch(slurm_script_path):
         logger.error(f'sbatch failed with exit code {e.returncode}')
         logger.error(e)
         raise
-
-
-def _parse_date_from_pp_path(path):
-    datestr = path.stem.split('.')[-1].split('_')[1]
-    if datestr[-1] == 'Z':
-        return pd.to_datetime(datestr, format="%Y%m%dT%H%MZ")
-    else:
-        return pd.to_datetime(datestr, format="%Y%m%dT%H")
-
 
 def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, **kwargs):
     """Write out a script for submission."""
@@ -274,11 +265,21 @@ def process(ctx, endtime, config_key):
 
 
 @cli.command()
+@click.option(
+    '--dims',
+    type=click.Choice(['2d', '3d', 'both']),
+    default='both',
+    help='Processing mode.'
+)
 @click.option('--nbatch', '-B', default=20)
 @click.option('--endtime', '-E', default='2022-01-01 00:00')
 @click.argument('config_key')
 @click.pass_context
-def coarsen(ctx, nbatch, endtime, config_key):
+def coarsen(ctx, dims, nbatch, endtime, config_key):
+    if dims == 'both':
+        dims = ['2d', '3d']
+    else:
+        dims = [dims]
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
     config = ctx.obj['config'].processing_config[config_key]
     jobids = []
@@ -288,7 +289,7 @@ def coarsen(ctx, nbatch, endtime, config_key):
     donepath_tpl = str(config['donedir'] / donereldir / 'coarsen/{dim}/z{zoom}/{job_id}.done')
     max_zoom = config['max_zoom']
 
-    for dim in ['2d', '3d']:
+    for dim in dims:
         prev_zoom_job_id = None
         if dim == '2d':
             time_idx = ctx.obj['config'].time2d
@@ -333,9 +334,9 @@ def coarsen(ctx, nbatch, endtime, config_key):
             if len(tasks):
                 logger.info(f'Running {len(tasks)} tasks')
                 if dim == '3d':
-                    mem = 256000
+                    mem = 20000
                 else:
-                    mem = 100000
+                    mem = 10000
                 # The heart of this method is a ds.coarsen(cell=4).mean() call.
                 # This benefits massively from a dask speed up.
                 # Request lots of cores per task.
