@@ -52,7 +52,6 @@ class DataArrayExtractor:
         # For some cubes (ones with names like m01s30i461 the da gets a name like filled-XXXXXX...
         # Make sure it's got the actual cube name so I can rename it later.
         da = xr.DataArray.from_iris(cube).rename(cube.name())
-        da.attrs.update(map_item.extra_attrs)
         return da
 
 
