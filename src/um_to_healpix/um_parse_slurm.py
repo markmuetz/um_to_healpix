@@ -60,9 +60,6 @@ def print_df(df, full):
             value = state_value_counts[state]
             print(f"{state:<10}: {value}")
 
-    # for state, value in df.state.value_counts().items():
-    #     print(f"{state:<10}: {value}")
-
     total = len(df)
     print(f"TOTAL     : {total}")
 
@@ -83,16 +80,30 @@ def print_df(df, full):
 
     ntogo = len(df[df.state.isin(['PENDING', 'RUNNING'])])
     nrunning = len(df[df.state == 'RUNNING'])
-    if nrunning:
+    ncompleted = len(df[df.state == 'COMPLETED'])
+    if nrunning and ncompleted:
         est_finish_duration = df_comp['elapsed'].mean() * ntogo / nrunning
         print()
         print(f'Est. finished duration: {est_finish_duration}')
         print(f'Est. finished time: {pd.Timestamp.now() + est_finish_duration}')
 
 
+# Useful in interactive mode.
 def view_logs(df):
     jobids = [list(Path.cwd().glob('slurm/output/*' + j[:-6] + '*.err'))[0] for j in df.jobid.values.tolist()]
     sp.run(['vim'] + jobids)
+
+
+# Useful in interactive mode.
+def fastest_hosts(df, min_num_runs=3, nhosts=40):
+    df_comp = df[df.state == 'COMPLETED']
+    host_stats = df_comp.groupby('host')['elapsed'].agg(['mean', 'count'])
+    host_stats = host_stats[host_stats['count'] >= min_num_runs]
+    top_40 = host_stats.sort_values(by='mean').head(nhosts)
+    print(top_40.to_string())
+
+    node_string = ",".join(sorted(top_40.index.tolist()))
+    print(f"#SBATCH --prefer={node_string}")
 
 
 @click.command
