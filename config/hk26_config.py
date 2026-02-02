@@ -9,11 +9,12 @@ import copy
 import operator
 from pathlib import Path
 
-import iris
 import iris.cube
 import pandas as pd
 
 from um_to_healpix.cube_to_da_mapping import MapItem, MultiMapItem
+from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cube_cell_method_is_empty, \
+    invert_cube_sign, check_cube_time_length
 
 # Global config.
 output_vn = 'v6.1'
@@ -121,29 +122,6 @@ drop_vars = [
 
 time2d = pd.date_range('2020-01-20', '2021-03-01', freq='h')
 time3d = pd.date_range('2020-01-20', '2021-03-01', freq='3h')
-
-def has_dimensions(*dims):
-    """Returns an Iris constraint that filters cubes based on dimensions."""
-
-    def dim_filter(cube):
-        cube_dims = tuple([c.name() for c in cube.dim_coords])
-        return cube_dims == dims
-
-    return iris.Constraint(cube_func=dim_filter)
-
-
-def cube_cell_method_is_not_empty(cube):
-    return cube.cell_methods != tuple()
-
-
-def cube_cell_method_is_empty(cube):
-    return cube.cell_methods == tuple()
-
-
-def invert_cube_sign(cube):
-    cube.data = -1 * cube.data
-    return cube
-
 
 # Mappings from output variable to .pp inputs
 # ===========================================
@@ -295,12 +273,6 @@ group2d_GAL9['name_map'][('pr', 'precipitation_flux')] = MultiMapItem(
     extra_attrs={
         'notes': 'Combined rain and snow, convective and stratiform. Hourly mean - time index shifted from half past the hour to the following hour'},
 )
-
-def check_cube_time_length(cube):
-    # Shorten cube if it has length 13 (applies to first cube only I think).
-    if cube.shape[0] == 13:
-        cube = cube[1:]
-    return cube
 
 # For CoMA9 simulations, use the instantaneous total precipitation.
 group2d_CoMA9 = copy.deepcopy(group2d)

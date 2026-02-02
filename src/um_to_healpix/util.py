@@ -131,3 +131,33 @@ def exception_info(ex_type, value, tb):
     except ImportError:
         import pdb as debug
     debug.pm()
+
+
+def has_dimensions(*dims):
+    """Returns an Iris constraint that filters cubes based on dimensions."""
+
+    def dim_filter(cube):
+        cube_dims = tuple([c.name() for c in cube.dim_coords])
+        return cube_dims == dims
+
+    return iris.Constraint(cube_func=dim_filter)
+
+
+def cube_cell_method_is_not_empty(cube):
+    return cube.cell_methods != tuple()
+
+
+def cube_cell_method_is_empty(cube):
+    return cube.cell_methods == tuple()
+
+
+def invert_cube_sign(cube):
+    cube.data = -1 * cube.data
+    return cube
+
+
+def check_cube_time_length(cube):
+    # Shorten cube if it has length 13 (applies to first cube only I think).
+    if cube.shape[0] == 13:
+        cube = cube[1:]
+    return cube
