@@ -13,9 +13,11 @@ if ipy := get_ipython():
 import pandas as pd
 import xarray as xr
 
+import easygems.healpix as egh
+
 from um_to_healpix.util import load_config
 
-from output_testing.plotting import plot_field_for_times, plot_all_fields
+from output_testing.plotting import plot_field_for_times, plot_all_fields, plot_zonal_mean
 
 # %% Library code.
 def open_remote_dataset(config, sim, freq, zoom, on_jasmin=False):
@@ -40,12 +42,26 @@ freq = 'PT1H'  # 2D
 zoom = 10  # Only zoom with any data in so far.
 on_jasmin = False
 
-# %% Load data.
+# %% Open data and attach coords.
 ds = open_remote_dataset(config, sim, freq, zoom, on_jasmin)
-da = ds['tas'].sel(time=slice(pd.Timestamp('2020-01-20 00:00:00'), pd.Timestamp('2020-01-21 05:00:00'))).compute()
-ds_plot = ds.isel(time=4).compute()
+ds = ds.pipe(egh.attach_coords)
+
+# %% Load data.
+start_date = pd.Timestamp('2020-01-20 01:00:00')
+end_date = pd.Timestamp('2020-01-20 12:00:00')
+pr = ds['pr'].sel(time=slice(start_date, end_date)).compute()
+# tas = ds['tas'].sel(time=slice(start_date, end_date)).compute()
+
 
 # %%
-plot_field_for_times(da.isel(time=slice(1, None)), 'tas')
+plot_zonal_mean(pr)
+
+# %%
+plot_field_for_times(pr.isel(time=slice(2, None)), 'pr')
+# plot_field_for_times(tas.isel(time=slice(1, None)), 'tas')
+
+# %% Load all fields data.
+ds_plot = ds.isel(time=4).compute()
+
 # %%
 plot_all_fields(ds_plot)

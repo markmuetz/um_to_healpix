@@ -52,6 +52,8 @@ def plot_all_fields(ds_plot):
 
 def plot_field_for_times(da, field):
     projection = ccrs.Robinson(central_longitude=0)
+    vmin = da.min()
+    vmax = da.max()
 
     for tidx in range(len(da.time)):
         fig, ax = plt.subplots(1, 1, figsize=(15, 8), subplot_kw={'projection': projection},
@@ -60,6 +62,8 @@ def plot_field_for_times(da, field):
         time = pd.Timestamp(da.time.values[tidx])
 
         kwargs = get_plot_kwargs(da)
+        kwargs['vmin'] = vmin
+        kwargs['vmax'] = vmax
 
         ax.set_title(f'time: {time} - {field}')
         ax.set_global()
@@ -70,4 +74,20 @@ def plot_field_for_times(da, field):
         ax.coastlines()
         plt.show()
 
+
+def plot_zonal_mean(da):
+    fig = plt.figure(layout='constrained')
+    bins = np.linspace(-90, 90, 1801)
+    t1 = pd.Timestamp(da.time.values[0])
+    t2 = pd.Timestamp(da.time.values[-1])
+    zonal_mean_da = da.mean(dim='time').groupby_bins('lat', bins).mean()
+    bin_mids = (bins[:-1] + bins[1:]) / 2
+    plt.plot(bin_mids, zonal_mean_da)
+
+    plt.xlim((-90, 90))
+    plt.xlabel('lat')
+    plt.ylabel(f'{da.long_name} ({da.attrs.get("units", "-")})')
+
+    plt.title(f'{t1} - {t2}')
+    plt.show()
 
