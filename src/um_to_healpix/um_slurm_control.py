@@ -165,7 +165,7 @@ def cli(ctx, config, dry_run, debug_exception, debug, trace, nconcurrent_tasks):
         logger.warning("Dry run: not launching any jobs")
 
     if debug_exception:
-        # Handle top level exceptions with a debugger.
+        # Handle top-level exceptions with a debugger.
         sys.excepthook = exception_info
 
     for path in ['slurm/tasks', 'slurm/scripts', 'slurm/output', 'slurm/jobids/']:
@@ -183,10 +183,10 @@ def cli_exit(ctx, result, **kwargs):
 
 
 @cli.command()
-@click.option('--end-time', '-E', type=pd.Timestamp, default=pd.Timestamp('2022-01-01 00:00'))
+@click.option('--endtime', '-E', type=pd.Timestamp, default=pd.Timestamp('2022-01-01 00:00'))
 @click.argument('config_key')
 @click.pass_context
-def process(ctx, end_time, config_key):
+def process(ctx, endtime, config_key):
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
 
     logger.debug(f'using {nconcurrent_tasks} concurrent tasks')
@@ -208,8 +208,8 @@ def process(ctx, end_time, config_key):
     # Build a list of tasks for all donepaths that don't exist.
     tasks = []
     for date in dates_to_paths:
-        if date > end_time:
-            logger.warning(f'Limiting date range to {end_time}')
+        if date > endtime:
+            logger.warning(f'Limiting date range to {endtime}')
             break
         if date == config['first_date']:
             create_donepath = donedir / donepath_tpl.format(task='create_empty_zarr_store', date=date)
@@ -274,8 +274,8 @@ def process(ctx, end_time, config_key):
 
 
 @cli.command()
-@click.option('--nbatch', '-B', default=5)
-@click.option('--endtime', '-E', default='2021-03-01 00:00')
+@click.option('--nbatch', '-B', default=20)
+@click.option('--endtime', '-E', default='2022-01-01 00:00')
 @click.argument('config_key')
 @click.pass_context
 def coarsen(ctx, nbatch, endtime, config_key):

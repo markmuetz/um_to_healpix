@@ -39,7 +39,7 @@ config = load_config('config/hk26_config.py')
 sim = 'glm.n2560_RAL3p3.tuned'
 freq = 'PT1H'  # 2D
 # freq = 'PT3H'  # 3D
-zoom = 10  # Only zoom with any data in so far.
+zoom = 9  # Only zoom with any data in so far.
 on_jasmin = False
 
 # %% Open data and attach coords.
@@ -48,16 +48,17 @@ ds = ds.pipe(egh.attach_coords)
 
 # %% Load data.
 start_date = pd.Timestamp('2020-01-20 01:00:00')
-end_date = pd.Timestamp('2020-01-20 12:00:00')
-pr = ds['pr'].sel(time=slice(start_date, end_date)).compute()
+end_date = pd.Timestamp('2020-01-20 01:00:00')
+# pr = ds['pr'].sel(time=slice(start_date, end_date)).compute()
 # tas = ds['tas'].sel(time=slice(start_date, end_date)).compute()
+clt = ds['clt'].sel(time=slice(start_date, end_date)).compute()
 
 
 # %%
-plot_zonal_mean(pr)
+plot_zonal_mean(clt)
 
 # %%
-plot_field_for_times(pr.isel(time=slice(2, None)), 'pr')
+plot_field_for_times(clt, 'clt')
 # plot_field_for_times(tas.isel(time=slice(1, None)), 'tas')
 
 # %% Load all fields data.

@@ -11,6 +11,7 @@ then the region might be [36:48, :] (i.e. the second half of the second day).
 
 Written by mark.muetzelfeldt@reading.ac.uk for the WCRP hackathon 2025 (UK node).
 """
+import os
 import asyncio
 import datetime as dt
 import json
@@ -470,7 +471,7 @@ class UMProcessTasks:
                 # Write this variable to the zarr store.
                 zarr_store_name = group['zarr_store']
                 url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
-                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'])
+                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True)
 
     def coarsen_healpix_region(self, task):
         """Coarsen the regions from source to target zooms, as defined by the task."""
@@ -500,7 +501,11 @@ class UMProcessTasks:
 
         # This will create a cluster with its specifications taken from the current machine.
         # i.e. you can request a SLURM node with lots of CPUs etc and the cluster will reflect this.
-        cluster = LocalCluster()
+
+        # Use Slurm environment variables, defaulting to 1 if not found
+        n_tasks = int(os.environ.get('SLURM_NTASKS', 1))
+        cpus_per_task = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+        cluster = LocalCluster(n_workers=n_tasks, threads_per_worker=cpus_per_task)
         client = cluster.get_client()
         logger.debug(cluster)
         logger.debug(client)
