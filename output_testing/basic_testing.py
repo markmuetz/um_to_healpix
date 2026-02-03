@@ -11,28 +11,9 @@ if ipy := get_ipython():
 
 # %% Imports.
 import pandas as pd
-import xarray as xr
 
-import easygems.healpix as egh
-
-from um_to_healpix.util import load_config
-
-from output_testing.plotting import plot_field_for_times, plot_all_fields, plot_zonal_mean
-
-# %% Library code.
-def open_remote_dataset(config, sim, freq, zoom, on_jasmin=False):
-    if on_jasmin:
-        protocol = 'http'
-        baseurl = 'hackathon-o.s3.jc.rl.ac.uk'
-    else:
-        protocol = 'https'
-        baseurl = 'hackathon-o.s3-ext.jc.rl.ac.uk'
-    url = f'{protocol}://{baseurl}/sim-data/{config.deploy}/{config.output_vn}/{sim}/um.{freq}.hp_z{zoom}.zarr/'
-    print(url)
-
-    ds = xr.open_dataset(url, engine='zarr')
-    return ds
-
+from um_to_healpix.util import load_config, open_remote_dataset
+from um_to_healpix.plotting import plot_field_for_times, plot_all_fields, plot_zonal_mean
 
 # %% Settings.
 config = load_config('config/hk26_config.py')
@@ -44,7 +25,6 @@ on_jasmin = False
 
 # %% Open data and attach coords.
 ds = open_remote_dataset(config, sim, freq, zoom, on_jasmin)
-ds = ds.pipe(egh.attach_coords)
 
 # %% Load data.
 start_date = pd.Timestamp('2020-01-20 01:00:00')

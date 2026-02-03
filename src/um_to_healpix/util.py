@@ -8,6 +8,8 @@ from pathlib import Path
 
 import botocore.exceptions
 import iris
+import xarray as xr
+from easygems import healpix as egh
 from iris.experimental.stratify import relevel
 from loguru import logger
 import numpy as np
@@ -161,3 +163,18 @@ def check_cube_time_length(cube):
     if cube.shape[0] == 13:
         cube = cube[1:]
     return cube
+
+
+def open_remote_dataset(config, sim, freq, zoom, on_jasmin=False):
+    if on_jasmin:
+        protocol = 'http'
+        baseurl = 'hackathon-o.s3.jc.rl.ac.uk'
+    else:
+        protocol = 'https'
+        baseurl = 'hackathon-o.s3-ext.jc.rl.ac.uk'
+    url = f'{protocol}://{baseurl}/sim-data/{config.deploy}/{config.output_vn}/{sim}/um.{freq}.hp_z{zoom}.zarr/'
+    print(url)
+
+    ds = xr.open_dataset(url, engine='zarr')
+    ds = ds.pipe(egh.attach_coords)
+    return ds
