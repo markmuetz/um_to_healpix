@@ -265,13 +265,9 @@ def process(ctx, endtime, config_key):
 
 
 @cli.command()
-@click.option(
-    '--dims',
-    type=click.Choice(['2d', '3d', 'both']),
-    default='both',
-    help='Processing mode.'
-)
-@click.option('--nbatch', '-B', default=20)
+@click.option( '--dims', type=click.Choice(['2d', '3d', 'both']), default='both')
+# Make this too low and e.g. coarsen_3d_8 seems to complain on writing to obj store.
+@click.option('--nbatch', '-B', default=10, help='number of subtasks for each job to run')
 @click.option('--endtime', '-E', default='2022-01-01 00:00')
 @click.argument('config_key')
 @click.pass_context
@@ -303,7 +299,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
         chunks = config['groups'][dim]['chunks']
 
         for zoom in range(max_zoom - 1, -1, -1):
-            logger.info(f'calc jobs for zoom {zoom}')
+            logger.info(f'{dim}: calc jobs for zoom {zoom}')
             tasks = []
             timechunk = chunks[zoom][0]
             logger.debug(f'timechunk: {timechunk}')
@@ -332,9 +328,9 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
                     }
                 )
             if len(tasks):
-                logger.info(f'Running {len(tasks)} tasks')
+                logger.info(f'- running {len(tasks)} tasks')
                 if dim == '3d':
-                    mem = 20000
+                    mem = 100000
                 else:
                     mem = 10000
                 # The heart of this method is a ds.coarsen(cell=4).mean() call.
