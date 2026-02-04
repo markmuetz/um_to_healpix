@@ -42,6 +42,7 @@ dependencies = [
     "s3fs",
     "stratify",
     "xarray",
+    "remake",
 ]
 
 [project.scripts]

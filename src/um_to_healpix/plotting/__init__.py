@@ -51,7 +51,6 @@ def plot_all_fields(ds_plot):
         ax.coastlines()
 
 def plot_timeseries(das):
-    plt.figure()
     for zoom, da in das.items():
         logger.debug('plot_precip', zoom)
         plt.plot(da.mean(dim='cell'), label=f'z{zoom}')
@@ -86,8 +85,7 @@ def plot_field_for_times(da, callback=None):
 
 
 
-def plot_zonal_mean(das):
-    bins = np.linspace(-89, 90, 1801)
+def plot_zonal_mean(das, bins=np.linspace(-90, 90, 1801)):
     bin_mids = (bins[:-1] + bins[1:]) / 2
 
     plt.figure(layout='constrained')
