@@ -181,9 +181,11 @@ name_map_2d = {
     ('rsus', 'surface_upwelling_shortwave_flux_in_air'): MapItem('m01s01i202', extra_processing=invert_cube_sign),
     ('rlus', 'surface_upwelling_longwave_flux_in_air'): MapItem('surface_net_downward_longwave_flux', extra_processing=invert_cube_sign),
 }
-# TODO: Not working! Problem with time dimension only having 1 value per day.
-# Wait till this is fixed before adding in v7.
-# ('soil_liquid_water_content', 'mrso'): MapItem('moisture_content_of_soil_layer'),
+
+# Add this in. Note, it's a 3D field with a vertical coord of depth, but it's at PT1H, so put in with the 2d vars.
+name_map_2d_depth = {
+    ('mrso', 'soil_liquid_water_content'): MapItem('moisture_content_of_soil_layer'),
+}
 
 name_map_3d = {
     ('ua', 'eastward_wind'): MapItem('x_wind'),
@@ -225,6 +227,14 @@ group2d = {
     'chunks': chunks2d,
 }
 
+group2d_depth = {
+    'time': time2d,
+    'zarr_store': 'PT1H',
+    'name_map': name_map_2d_depth,
+    'constraint': has_dimensions("time", "depth", "latitude", "longitude"),
+    'chunks': chunks3d,
+}
+
 group3d = {
     'time': time3d,
     'zarr_store': 'PT3H',
@@ -249,7 +259,7 @@ group3d_ml = {
 # ./10km-GAL9-nest/glm/field.pp/apvera.pp/glm.n1280_GAL9_nest.apvera_20200120T00.pp
 global_sim_keys = {
     'glm.n2560_RAL3p3.tuned': '5km-RAL3p3-tuned',
-    # 'glm.n1280_CoMA9': '10km-CoMA9',
+    'glm.n1280_CoMA9': '10km-CoMA9',
     # 'glm.n1280_GAL9_nest': '10km-GAL9-nest',
 }
 
@@ -281,7 +291,11 @@ group2d_CoMA9['name_map'][('pr', 'precipitation_flux')] = MapItem(
     extra_processing=check_cube_time_length,
     extra_attrs={
         'notes': 'Uses instantaneous total precipitation'},
-)
+    )
+
+group3d_ml_CoMA9 = copy.deepcopy(group3d_ml)
+# TODO: Not present.
+del group3d_ml_CoMA9['name_map'][('qs', 'mass_fraction_of_snow_water_in_air')]
 
 # Build a mapping to go from key to the correct 2d group
 group2d_global_map = {}
@@ -292,6 +306,15 @@ for key in global_sim_keys:
         group2d_global_map[key] = group2d_CoMA9
     else:
         group2d_global_map[key] = group2d
+
+group3d_ml_global_map = {}
+for key in global_sim_keys:
+    if key.endswith('GAL9_nest'):
+        group3d_ml_global_map[key] = group3d_ml
+    elif key.endswith('CoMA9'):
+        group3d_ml_global_map[key] = group3d_ml_CoMA9
+    else:
+        group3d_ml_global_map[key] = group3d_ml
 
 # Construct global configs
 # ========================
@@ -310,8 +333,9 @@ global_configs = {
         'drop_vars': drop_vars,
         'groups': {
             '2d': group2d_global_map[key],
+            '2d_depth': group2d_depth,
             '3d': group3d,
-            '3d_ml': group3d_ml,
+            '3d_ml': group3d_ml_global_map[key],
         },
         'metadata': {
             'simulation': key,

@@ -289,7 +289,6 @@ class UMProcessTasks:
         add_cyclic = self.config.get('add_cyclic', True)
         regional = self.config.get('regional', False)
 
-        logger.trace((zoom, self.config['max_zoom']))
         if zoom == self.config['max_zoom']:
             # Gen weights path for regridding (only needed at max zoom) if it doesn't already exist.
             weights_path = self.config['weightsdir'] / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
@@ -308,20 +307,29 @@ class UMProcessTasks:
         else:
             cells = np.arange(npix)
 
-        if da.ndim == 3:
+        if da.dims == ('time', 'latitude', 'longitude'):
             dims = ['time', 'cell']
             coords = {zarr_time_name: zarr_time, 'cell': cells}
             shape = (len(zarr_time), len(cells))
-        elif da.ndim == 4:
+        elif (da.dims == ('time', 'pressure', 'latitude', 'longitude') or
+              da.dims == ('time', 'model_level_number', 'latitude', 'longitude')):
             dims = ['time', 'pressure', 'cell']
+            # Note this handles model_level_number as well so can't just pull these out of da.
             pressure_levels = [1, 5, 10, 20, 30, 50, 70, 100, 150, 200, 250, 300, 400, 500, 600, 700, 750,
                                800, 850, 875, 900, 925, 950, 975, 1000]
             coords = {zarr_time_name: zarr_time,
                       'pressure': (['pressure'], pressure_levels, {'units': 'hPa'}),
                       'cell': cells}
             shape = (len(zarr_time), len(pressure_levels), len(cells))
+        elif da.dims == ('time', 'depth', 'latitude', 'longitude'):
+            dims = ['time', 'depth', 'cell']
+            coords = {zarr_time_name: zarr_time,
+                      'depth': (['depth'], da.depth.values, {'units': 'm'}),
+                      'cell': cells}
+            shape = (len(zarr_time), len(da.depth), len(cells))
         else:
-            raise Exception('ndim must be 3 or 4')
+            logger.error(da.dims)
+            raise Exception('dims not recognized')
 
         # This is the idiom for using xarray to create a zarr entry with the correct dimensions but no actual data.
         # https://docs.xarray.dev/en/stable/user-guide/io.html#distributed-writes
@@ -356,6 +364,7 @@ class UMProcessTasks:
             for group_name, group in self.config['groups'].items()
         }
 
+        # TODO: Add orog back in!
         add_orog = not regional and False
 
         if add_orog:
