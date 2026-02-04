@@ -378,8 +378,9 @@ def ls(ctx):
 @click.argument('config_key')
 @click.option('--date', '-d', default=None)
 @click.option('--output-file', '-o', default=None)
+@click.option('--interactive', '-I', default=False)
 @click.pass_context
-def check_output_mapping(ctx, config_key, date, output_file):
+def check_output_mapping(ctx, config_key, date, output_file, interactive):
     import iris
     import operator
 
@@ -400,7 +401,7 @@ def check_output_mapping(ctx, config_key, date, output_file):
         # TODO: can't load data for Africa or SEA CTC??
         if 'Africa' in config_key or 'SEA' in config_key or 'CTC_km4p4_CoMA9' in config_key:
             continue
-        logger.info(f'processing {config_key}')
+        logger.info(f'check output mapping: {config_key}')
         config = ctx.obj['config'].processing_config[config_key]
         if date is None:
             date = config['first_date']
@@ -451,6 +452,8 @@ def check_output_mapping(ctx, config_key, date, output_file):
         df.to_csv(output_file, index=False)
     else:
         print(df)
+    if interactive:
+        breakpoint()
 
 
 def title(msg):
