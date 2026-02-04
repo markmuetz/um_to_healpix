@@ -63,6 +63,15 @@ def sbatch(slurm_script_path):
         logger.error(e)
         raise
 
+
+def _parse_date_from_pp_path(path):
+    datestr = path.stem.split('.')[-1].split('_')[1]
+    if datestr[-1] == 'Z':
+        return pd.to_datetime(datestr, format="%Y%m%dT%H%MZ")
+    else:
+        return pd.to_datetime(datestr, format="%Y%m%dT%H")
+
+
 def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, **kwargs):
     """Write out a script for submission."""
     now = pd.Timestamp.now()
