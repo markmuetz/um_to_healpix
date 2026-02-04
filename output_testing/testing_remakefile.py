@@ -14,16 +14,20 @@ import um_to_healpix.plotting as umplt
 
 rmk = Remake()
 
+SIMS = ['glm.n2560_RAL3p3.tuned', 'glm.n1280_CoMA9']
+
 def zooms_for_sim(sim):
     if sim == 'glm.n2560_RAL3p3.tuned':
         zooms = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+    elif sim == 'glm.n1280_CoMA9':
+        zooms = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
     return zooms
 
 
 class CreateLocalDataCache(Rule):
     atomic_output = False
     rule_matrix = {
-        'sim': ['glm.n2560_RAL3p3.tuned'],
+        'sim': SIMS,
     }
     rule_inputs = {}
     @staticmethod
@@ -86,7 +90,7 @@ class CreateLocalDataCache(Rule):
 
 class PlotSanityChecks(Rule):
     rule_matrix = {
-        'sim': ['glm.n2560_RAL3p3.tuned'],
+        'sim': SIMS,
     }
     rule_inputs = CreateLocalDataCache.rule_outputs
     rule_outputs = {'dummy': 'outputs/{sim}/dummy.txt'}

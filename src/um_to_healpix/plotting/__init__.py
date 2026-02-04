@@ -29,7 +29,14 @@ def plot_all_fields(ds_plot):
     """Plot all fields for a given dataset. Assumes that each field is 2D - i.e. sel(time=..., [pressure=...]) has been applied"""
     zoom = int(np.log2(ds_plot.crs.attrs['healpix_nside']))
     projection = ccrs.Robinson(central_longitude=0)
-    rows = maths.ceil(len(ds_plot.data_vars) / 4)
+    das = {}
+    for name, da in ds_plot.data_vars.items():
+        if name == 'mrso':
+            das.update({name + str(i): da[i] for i in range(len(da.depth))})
+        else:
+            das[name] = da
+
+    rows = maths.ceil(len(das) / 4)
     fig, axes = plt.subplots(rows, 4, figsize=(30, rows * 20 / 6), subplot_kw={'projection': projection},
                              layout='constrained')
     if 'pressure' in ds_plot.coords:
@@ -37,7 +44,7 @@ def plot_all_fields(ds_plot):
     else:
         plt.suptitle(f'{ds_plot.simulation} z{zoom}')
 
-    for ax, (name, da) in zip(axes.flatten(), ds_plot.data_vars.items()):
+    for ax, (name, da) in zip(axes.flatten(), das.items()):
         time = pd.Timestamp(ds_plot.time.values.item())
 
         kwargs = get_plot_kwargs(da)
