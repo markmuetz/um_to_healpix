@@ -73,23 +73,27 @@ def cli():
 
 @cli.command
 @click.argument('target')
-def target(target):
-    cmd = 'sinfo -p standard -t idle,mix,alloc,comp -h -o "%N"'
-    result = sp.run(cmd, capture_output=True, text=True, shell=True)
-    lines = [l for l in result.stdout.split('\n') if l]
-    line = lines[0]
-    # Parse out hostnames from ranges in form:
-    # host[1004-1043,1045-1116,1118-1132,1134-1135,1137-1170,1183-1272]
-    hostnums = line[5:-1]
-    hostranges = hostnums.split(',')
-    hostids = []
-    for hostrange in hostranges:
-        if '-' in hostrange:
-            start, end = hostrange.split('-')
-        else:
-            start = end = hostrange
-        hostids.extend(list(range(int(start), int(end) + 1)))
-    hostnames = [f'host{i}' for i in hostids]
+@click.option('--hostnames', default=None)
+def target(target, hostnames):
+    if hostnames:
+        hostnames = hostnames.split(',')
+    else:
+        cmd = 'sinfo -p standard -t idle,mix,alloc,comp -h -o "%N"'
+        result = sp.run(cmd, capture_output=True, text=True, shell=True)
+        lines = [l for l in result.stdout.split('\n') if l]
+        line = lines[0]
+        # Parse out hostnames from ranges in form:
+        # host[1004-1043,1045-1116,1118-1132,1134-1135,1137-1170,1183-1272]
+        hostnums = line[5:-1]
+        hostranges = hostnums.split(',')
+        hostids = []
+        for hostrange in hostranges:
+            if '-' in hostrange:
+                start, end = hostrange.split('-')
+            else:
+                start = end = hostrange
+            hostids.extend(list(range(int(start), int(end) + 1)))
+        hostnames = [f'host{i}' for i in hostids]
 
     slurm_script_path = write_tasks_slurm_job_array(target=target)
 
