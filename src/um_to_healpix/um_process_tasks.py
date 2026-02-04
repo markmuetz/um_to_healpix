@@ -116,8 +116,11 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
     logger.debug(
         f'writing {name} to zarr store {url} (idx={idx}, time={source_times_to_match[0]})')
     # Use time index to select a region to write data to.
-    if group_name.startswith('2d'):
+    if group_name == '2d':
         region = {'time': slice(idx, idx + len(da['time'])), 'cell': slice(None)}
+    elif group_name == '2d_depth':
+        # e.g. mrso (only at the moment)
+        region = {'time': slice(idx, idx + len(da['time'])), 'depth': slice(None), 'cell': slice(None)}
     elif group_name.startswith('3d'):
         region = {'time': slice(idx, idx + len(da['time'])), 'pressure': slice(None), 'cell': slice(None)}
     else:

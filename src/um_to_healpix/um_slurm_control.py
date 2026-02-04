@@ -34,7 +34,7 @@ SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH -o slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.out
 #SBATCH -e slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.err
 #SBATCH --comment={comment}
-#SBATCH --exclude=host1210,host1211,host1212,host1226,host1227,host1228,host1247,host1248,host1249,host1250
+#SBATCH --exclude=host1117,host1210,host1211,host1212,host1226,host1227,host1228,host1247,host1248,host1249,host1250
 {dependency}
 
 # host1210-2, host1226-8 are silently failing :(.
