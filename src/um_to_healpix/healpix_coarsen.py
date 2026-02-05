@@ -44,7 +44,7 @@ def map_regional_to_global(_da, src_zoom, dim):
     return da_new
 
 
-def map_global_to_regional(_da, src_ds_region, tgt_ds_store, dim):
+def map_global_to_regional(_da, src_ds_time_slice, tgt_ds_store, dim):
     logger.debug(_da.name)
     coords = {
         n: c for n, c in _da.coords.items()
@@ -59,7 +59,7 @@ def map_global_to_regional(_da, src_ds_region, tgt_ds_store, dim):
             dims = ['time', 'cell']
         elif dim == '3d':
             dims = ['time', 'pressure', 'cell']
-        da = list(src_ds_region.data_vars.values())[0]
+        da = list(src_ds_time_slice.data_vars.values())[0]
         shape = list(da.shape[:-1]) + [len(coords['cell'])]
 
     da_new = xr.DataArray(np.full(shape, np.nan, np.float32), dims=dims, name=_da.name, coords=coords)
@@ -94,18 +94,18 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
 
     tgt_chunks = chunks[tgt_zoom]
 
-    src_ds_region = src_ds.isel(time=time_slice)
+    src_ds_time_slice = src_ds.isel(time=time_slice)
     if regional:
         if dim == '3d' and 'weights' in src_ds.data_vars.keys():
             logger.debug('drop weights')
-            src_ds_region = src_ds_region.drop_vars('weights')
-        src_ds_region = src_ds_region.map(map_regional_to_global, src_zoom=src_zoom, dim=dim)
+            src_ds_time_slice = src_ds_time_slice.drop_vars('weights')
+        src_ds_time_slice = src_ds_time_slice.map(map_regional_to_global, src_zoom=src_zoom, dim=dim)
 
     # To compute or not to compute...
     # Computing would force the download and loading into mem, but might stop contention for the resource?
-    # tgt_ds = src_ds_region.coarsen(cell=4).mean()
+    # tgt_ds = src_ds_time_slice.coarsen(cell=4).mean()
     logger.debug('compute tgt_ds')
-    tgt_ds = src_ds_region.coarsen(cell=4).mean().compute()
+    tgt_ds = src_ds_time_slice.coarsen(cell=4).mean().compute()
 
     logger.info('modify metadata')
     if dim == '2d':
@@ -120,8 +120,8 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
     if regional:
         zarr_chunks = {'time': chunks[tgt_zoom][0], 'cell': -1}
         tgt_ds_store = xr.open_zarr(tgt_store, chunks=zarr_chunks)
-        tgt_ds = tgt_ds.map(map_global_to_regional, src_ds_region=src_ds_region, tgt_ds_store=tgt_ds_store, dim=dim)
-        if (src_ds_region.time[0] == src_ds.time[0]) and 'weights' not in src_ds.data_vars:
+        tgt_ds = tgt_ds.map(map_global_to_regional, src_ds_time_slice=src_ds_time_slice, tgt_ds_store=tgt_ds_store, dim=dim)
+        if (src_ds_time_slice.time[0] == src_ds.time[0]) and 'weights' not in src_ds.data_vars:
             tgt_weights = calc_tgt_weights(src_ds, tgt_ds, tgt_zoom, dim)
             tgt_ds['weights'] = tgt_weights
             logger.debug(float(np.isnan(tgt_ds.weights).sum().values))
@@ -136,6 +136,7 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
         raise ValueError(f'dim {dim} is not supported')
     for da in tgt_ds.data_vars.values():
         if np.isnan(da.values).all():
+            # This can happen for e.g. the first timestep so don't raise an exception.
             logger.error(f'ERROR: ALL VALUES ARE NAN FOR {da.name}')
         else:
             logger.debug('values not all nan')
@@ -143,7 +144,7 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
             continue
         logger.debug(f'  writing {da.name}')
         if da.name == 'weights':
-            if src_ds_region.time[0] == src_ds.time[0]:
+            if src_ds_time_slice.time[0] == src_ds.time[0]:
                 if dim == '2d':
                     region = {'cell': slice(None)}
                     asyncio.run(

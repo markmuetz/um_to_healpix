@@ -12,18 +12,18 @@ from collections import defaultdict
 from itertools import batched
 from pathlib import Path
 
+
 import click
 import pandas as pd
 from loguru import logger
 
 from .cube_to_da_mapping import DataArrayExtractor
-from .um_processing_config import slurm_config, processing_config, time2d, time3d
-from .util import sysrun
+from .util import sysrun, load_config, exception_info
 
 # SLURB script template - filled in and written to a file for calling with `sbatch`.
 SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH --job-name="{job_name}"
-#SBATCH --time=10:00:00
+#SBATCH --time={time}
 #SBATCH --mem={mem}
 #SBATCH --account={account}
 #SBATCH --ntasks={ntasks}
@@ -34,7 +34,10 @@ SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH -o slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.out
 #SBATCH -e slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.err
 #SBATCH --comment={comment}
+#SBATCH --exclude=host1117,host1210,host1211,host1212,host1226,host1227,host1228,host1247,host1248,host1249,host1250
 {dependency}
+
+# host1210-2, host1226-8 are silently failing :(.
 
 # These nodes repeatedly fail to be able to read the kscale GWS.
 # Apparently these have been fixed:
@@ -48,7 +51,7 @@ fi
 
 ARRAY_INDEX=${{SLURM_ARRAY_TASK_ID}}
 
-um_process_tasks slurm {tasks_path} ${{ARRAY_INDEX}}
+um-process-tasks slurm {tasks_path} ${{ARRAY_INDEX}}
 """
 
 def sbatch(slurm_script_path):
@@ -63,10 +66,13 @@ def sbatch(slurm_script_path):
 
 def _parse_date_from_pp_path(path):
     datestr = path.stem.split('.')[-1].split('_')[1]
-    return pd.to_datetime(datestr, format="%Y%m%dT%H")
+    if datestr[-1] == 'Z':
+        return pd.to_datetime(datestr, format="%Y%m%dT%H%MZ")
+    else:
+        return pd.to_datetime(datestr, format="%Y%m%dT%H")
 
 
-def write_tasks_slurm_job_array(config_key, tasks, job_name, depends_on=None, **kwargs):
+def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, **kwargs):
     """Write out a script for submission."""
     now = pd.Timestamp.now()
     date_string = now.strftime("%Y%m%d_%H%M%S")
@@ -134,13 +140,17 @@ def write_jobids(jobids):
 
 
 @click.group()
+@click.option('--config', '-C', default=Path('config/hk25_config.py'), type=Path)
 @click.option('--dry-run', '-n', is_flag=True)
+@click.option('--debug-exception', '-X', is_flag=True)
 @click.option('--debug', '-D', is_flag=True)
 @click.option('--trace', '-T', is_flag=True)
 @click.option('--nconcurrent-tasks', '-N', default=40, type=int)
 @click.pass_context
-def cli(ctx, dry_run, debug, trace, nconcurrent_tasks):
+def cli(ctx, config, dry_run, debug_exception, debug, trace, nconcurrent_tasks):
     ctx.ensure_object(dict)
+    ctx.obj['config_path'] = str(config)
+    ctx.obj['config'] = load_config(config)
     ctx.obj['dry_run'] = dry_run
     ctx.obj['nconcurrent_tasks'] = nconcurrent_tasks
     logger.remove()
@@ -153,6 +163,10 @@ def cli(ctx, dry_run, debug, trace, nconcurrent_tasks):
 
     if dry_run:
         logger.warning("Dry run: not launching any jobs")
+
+    if debug_exception:
+        # Handle top-level exceptions with a debugger.
+        sys.excepthook = exception_info
 
     for path in ['slurm/tasks', 'slurm/scripts', 'slurm/output', 'slurm/jobids/']:
         path = Path(path)
@@ -169,14 +183,15 @@ def cli_exit(ctx, result, **kwargs):
 
 
 @cli.command()
+@click.option('--endtime', '-E', type=pd.Timestamp, default=pd.Timestamp('2022-01-01 00:00'))
 @click.argument('config_key')
 @click.pass_context
-def process(ctx, config_key):
+def process(ctx, endtime, config_key):
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
 
     logger.debug(f'using {nconcurrent_tasks} concurrent tasks')
     logger.info(f'Running for {config_key}')
-    config = processing_config[config_key]
+    config = ctx.obj['config'].processing_config[config_key]
     logger.trace(config)
     basedir = config['basedir']
     donedir = config['donedir']
@@ -193,9 +208,8 @@ def process(ctx, config_key):
     # Build a list of tasks for all donepaths that don't exist.
     tasks = []
     for date in dates_to_paths:
-        # TODO:!!
-        if date > pd.Timestamp('2020-02-01 00:00'):
-            logger.error('DO NOT LEAVE IN: Limiting date range to 2020-02-01')
+        if date > endtime:
+            logger.warning(f'Limiting date range to {endtime}')
             break
         if date == config['first_date']:
             create_donepath = donedir / donepath_tpl.format(task='create_empty_zarr_store', date=date)
@@ -205,12 +219,13 @@ def process(ctx, config_key):
                 logger.info('Creating zarr store')
                 create_task = {
                     'task_type': 'create_empty_zarr_stores',
+                    'config_path': ctx.obj['config_path'],
                     'config_key': config_key,
                     'date': str(date),
                     'inpaths': [str(p) for p in dates_to_paths[date]],
                     'donepath': str(create_donepath),
                 }
-                slurm_script_path = write_tasks_slurm_job_array(config_key, [create_task], f'createzarr',
+                slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, [create_task], f'createzarr',
                                                                 nconcurrent_tasks=nconcurrent_tasks)
                 logger.debug(slurm_script_path)
                 create_donepath.parent.mkdir(parents=True, exist_ok=True)
@@ -218,6 +233,8 @@ def process(ctx, config_key):
                     create_jobid = sbatch(slurm_script_path)
                     logger.info(f'create empty zarr stores jobid: {create_jobid}')
                     jobids.append(create_jobid)
+            else:
+                logger.debug('zarr store already created')
 
         donepath = (donedir / donepath_tpl.format(task='regrid', date=date))
         donepath.parent.mkdir(parents=True, exist_ok=True)
@@ -229,6 +246,7 @@ def process(ctx, config_key):
             tasks.append(
                 {
                     'task_type': 'regrid',
+                    'config_path': ctx.obj['config_path'],
                     'config_key': config_key,
                     'date': str(date),
                     'inpaths': [str(p) for p in dates_to_paths[date]],
@@ -240,7 +258,7 @@ def process(ctx, config_key):
     if len(tasks):
         # Run tasks.
         logger.info(f'Running {len(tasks)} tasks')
-        slurm_script_path = write_tasks_slurm_job_array(config_key, tasks, 'regrid',
+        slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks, 'regrid',
                                                         nconcurrent_tasks=nconcurrent_tasks,
                                                         depends_on=create_jobid)
         logger.debug(slurm_script_path)
@@ -256,13 +274,19 @@ def process(ctx, config_key):
 
 
 @cli.command()
-@click.option('--nbatch', '-B', default=5)
-@click.option('--endtime', '-E', default='2021-03-01 00:00')
+@click.option( '--dims', type=click.Choice(['2d', '3d', 'both']), default='both')
+# Make this too low and e.g. coarsen_3d_8 seems to complain on writing to obj store.
+@click.option('--nbatch', '-B', default=10, help='number of subtasks for each job to run')
+@click.option('--endtime', '-E', default='2022-01-01 00:00')
 @click.argument('config_key')
 @click.pass_context
-def coarsen(ctx, nbatch, endtime, config_key):
+def coarsen(ctx, dims, nbatch, endtime, config_key):
+    if dims == 'both':
+        dims = ['2d', '3d']
+    else:
+        dims = [dims]
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
-    config = processing_config[config_key]
+    config = ctx.obj['config'].processing_config[config_key]
     jobids = []
     dummy_donepath_tpl = config['donepath_tpl']
     dummy_donepath = dummy_donepath_tpl.format(task='dummy', date='dummy')
@@ -270,12 +294,12 @@ def coarsen(ctx, nbatch, endtime, config_key):
     donepath_tpl = str(config['donedir'] / donereldir / 'coarsen/{dim}/z{zoom}/{job_id}.done')
     max_zoom = config['max_zoom']
 
-    for dim in ['2d', '3d']:
+    for dim in dims:
         prev_zoom_job_id = None
         if dim == '2d':
-            time_idx = time2d
+            time_idx = ctx.obj['config'].time2d
         elif dim == '3d':
-            time_idx = time3d
+            time_idx = ctx.obj['config'].time3d
         else:
             raise Exception(f'unknown dim: {dim}')
         if endtime is not None:
@@ -284,7 +308,7 @@ def coarsen(ctx, nbatch, endtime, config_key):
         chunks = config['groups'][dim]['chunks']
 
         for zoom in range(max_zoom - 1, -1, -1):
-            logger.info(f'calc jobs for zoom {zoom}')
+            logger.info(f'{dim}: calc jobs for zoom {zoom}')
             tasks = []
             timechunk = chunks[zoom][0]
             logger.debug(f'timechunk: {timechunk}')
@@ -305,6 +329,7 @@ def coarsen(ctx, nbatch, endtime, config_key):
                 tasks.append(
                     {
                         'task_type': 'coarsen',
+                        'config_path': ctx.obj['config_path'],
                         'config_key': config_key,
                         'tgt_zoom': zoom,
                         'dim': dim,
@@ -312,15 +337,16 @@ def coarsen(ctx, nbatch, endtime, config_key):
                     }
                 )
             if len(tasks):
-                logger.info(f'Running {len(tasks)} tasks')
+                logger.info(f'- running {len(tasks)} tasks')
                 if dim == '3d':
-                    mem = 256000
-                else:
                     mem = 100000
+                else:
+                    mem = 10000
                 # The heart of this method is a ds.coarsen(cell=4).mean() call.
                 # This benefits massively from a dask speed up.
                 # Request lots of cores per task.
                 slurm_script_path = write_tasks_slurm_job_array(
+                    ctx.obj['config'].slurm_config,
                     config_key, tasks, f'coarsen_{dim}_{zoom}',
                     depends_on=prev_zoom_job_id,
                     partition='standard',
@@ -344,7 +370,7 @@ def coarsen(ctx, nbatch, endtime, config_key):
 @cli.command()
 @click.pass_context
 def ls(ctx):
-    for key in processing_config:
+    for key in ctx.obj['config'].processing_config:
         print(key)
 
 
@@ -352,8 +378,9 @@ def ls(ctx):
 @click.argument('config_key')
 @click.option('--date', '-d', default=None)
 @click.option('--output-file', '-o', default=None)
+@click.option('--interactive', '-I', default=False)
 @click.pass_context
-def check_output_mapping(ctx, config_key, date, output_file):
+def check_output_mapping(ctx, config_key, date, output_file, interactive):
     import iris
     import operator
 
@@ -364,7 +391,7 @@ def check_output_mapping(ctx, config_key, date, output_file):
         operator.truediv: '/',
     }
     if config_key == 'all':
-        config_keys = list(processing_config)
+        config_keys = list(ctx.obj['config'].processing_config)
     else:
         config_keys = [config_key]
 
@@ -374,8 +401,8 @@ def check_output_mapping(ctx, config_key, date, output_file):
         # TODO: can't load data for Africa or SEA CTC??
         if 'Africa' in config_key or 'SEA' in config_key or 'CTC_km4p4_CoMA9' in config_key:
             continue
-        logger.info(f'processing {config_key}')
-        config = processing_config[config_key]
+        logger.info(f'check output mapping: {config_key}')
+        config = ctx.obj['config'].processing_config[config_key]
         if date is None:
             date = config['first_date']
 
@@ -425,6 +452,8 @@ def check_output_mapping(ctx, config_key, date, output_file):
         df.to_csv(output_file, index=False)
     else:
         print(df)
+    if interactive:
+        breakpoint()
 
 
 def title(msg):
@@ -467,7 +496,7 @@ def analyse_output_mapping(ctx, input_file):
 @click.option('--list-keys', '-L', is_flag=True)
 @click.pass_context
 def print_config(ctx, list_keys, args):
-    config = processing_config[args[0]]
+    config = ctx.obj['config'].processing_config[args[0]]
     for dict_key in args[1:]:
         try:
             config = config[dict_key]

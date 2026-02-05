@@ -1,10 +1,15 @@
+import importlib.util
+import sys
 from functools import partial
 import asyncio
 import random
 import subprocess as sp
+from pathlib import Path
 
 import botocore.exceptions
 import iris
+import xarray as xr
+from easygems import healpix as egh
 from iris.experimental.stratify import relevel
 from loguru import logger
 import numpy as np
@@ -98,4 +103,78 @@ def sysrun(cmd):
     return sp.run(cmd, check=True, shell=True, stdout=sp.PIPE, stderr=sp.PIPE, encoding='utf8')
 
 
+def load_config(file_path):
+    path = Path(file_path)
+    module_name = path.stem  # Use filename without extension
 
+    # 1. Create the spec
+    spec = importlib.util.spec_from_file_location(module_name, file_path)
+
+    # 2. Create a new module based on the spec
+    config_module = importlib.util.module_from_spec(spec)
+
+    # 3. Add to sys.modules (optional but recommended for imports)
+    sys.modules[module_name] = config_module
+
+    # 4. Execute the module to populate it
+    spec.loader.exec_module(config_module)
+
+    return config_module
+
+
+def exception_info(ex_type, value, tb):
+    """Drop user into a debug shell on exception."""
+    import traceback
+
+    traceback.print_exception(ex_type, value, tb)
+    try:
+        # Might not be installed.
+        import ipdb as debug
+    except ImportError:
+        import pdb as debug
+    debug.pm()
+
+
+def has_dimensions(*dims):
+    """Returns an Iris constraint that filters cubes based on dimensions."""
+
+    def dim_filter(cube):
+        cube_dims = tuple([c.name() for c in cube.dim_coords])
+        return cube_dims == dims
+
+    return iris.Constraint(cube_func=dim_filter)
+
+
+def cube_cell_method_is_not_empty(cube):
+    return cube.cell_methods != tuple()
+
+
+def cube_cell_method_is_empty(cube):
+    return cube.cell_methods == tuple()
+
+
+def invert_cube_sign(cube):
+    cube.data = -1 * cube.data
+    return cube
+
+
+def check_cube_time_length(cube):
+    # Shorten cube if it has length 13 (applies to first cube only I think).
+    if cube.shape[0] == 13:
+        cube = cube[1:]
+    return cube
+
+
+def open_remote_dataset(config, sim, freq, zoom, on_jasmin=False):
+    if on_jasmin:
+        protocol = 'http'
+        baseurl = 'hackathon-o.s3.jc.rl.ac.uk'
+    else:
+        protocol = 'https'
+        baseurl = 'hackathon-o.s3-ext.jc.rl.ac.uk'
+    url = f'{protocol}://{baseurl}/sim-data/{config.deploy}/{config.output_vn}/{sim}/um.{freq}.hp_z{zoom}.zarr/'
+    print(url)
+
+    ds = xr.open_dataset(url, engine='zarr')
+    ds = ds.pipe(egh.attach_coords)
+    return ds

@@ -11,6 +11,7 @@ then the region might be [36:48, :] (i.e. the second half of the second day).
 
 Written by mark.muetzelfeldt@reading.ac.uk for the WCRP hackathon 2025 (UK node).
 """
+import os
 import asyncio
 import datetime as dt
 import json
@@ -31,11 +32,10 @@ import s3fs
 import xarray as xr
 from loguru import logger
 
-from .um_processing_config import processing_config, shared_metadata
 from .cube_to_da_mapping import DataArrayExtractor
 from .healpix_coarsen import coarsen_healpix_zarr_region, async_da_to_zarr_with_retries
 from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited_healpix
-from .util import async_da_to_zarr_with_retries
+from .util import async_da_to_zarr_with_retries, load_config, exception_info
 
 # Super simple .s3cfg parser - must be in home directory.
 s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
@@ -116,8 +116,11 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
     logger.debug(
         f'writing {name} to zarr store {url} (idx={idx}, time={source_times_to_match[0]})')
     # Use time index to select a region to write data to.
-    if group_name.startswith('2d'):
+    if group_name == '2d':
         region = {'time': slice(idx, idx + len(da['time'])), 'cell': slice(None)}
+    elif group_name == '2d_depth':
+        # e.g. mrso (only at the moment)
+        region = {'time': slice(idx, idx + len(da['time'])), 'depth': slice(None), 'cell': slice(None)}
     elif group_name.startswith('3d'):
         region = {'time': slice(idx, idx + len(da['time'])), 'pressure': slice(None), 'cell': slice(None)}
     else:
@@ -170,8 +173,9 @@ def get_regional_bounds(da):
 
 
 class UMProcessTasks:
-    def __init__(self, config):
+    def __init__(self, config, shared_metadata):
         self.config = config
+        self.shared_metadata = shared_metadata
         self.drop_vars = config['drop_vars']
         self.groups = config['groups']
 
@@ -188,7 +192,7 @@ class UMProcessTasks:
                 'regional': regional,
             },
             **self.config['metadata'],
-            **shared_metadata,
+            **self.shared_metadata,
         }
 
         if not regional:
@@ -209,14 +213,23 @@ class UMProcessTasks:
         logger.info(f'Found {len(group_cubes)} cubes for {group_name}')
 
         list_da = []
+        missing_map_items = []
         extractor = DataArrayExtractor(None, None)
         for key, map_item in name_map.items():
             short_name, long_name = key
-            cubes = extractor.extract_cubes(map_item, group_cubes)
+            try:
+                cubes = extractor.extract_cubes(map_item, group_cubes)
+            except iris.exceptions.ConstraintMismatchError:
+                missing_map_items.append(map_item)
+
             # Just use first cube here.
             da = xr.DataArray.from_iris(cubes[0]).rename(short_name)
             da.attrs['long_name'] = long_name
+            da.attrs.update(map_item.extra_attrs)
             list_da.append(da)
+
+        if missing_map_items:
+            raise Exception('MISSING: \n' + '\n'.join('* ' + str(m) for m in missing_map_items))
 
         return list_da
 
@@ -229,7 +242,6 @@ class UMProcessTasks:
         max_zoom = config['max_zoom']
         add_cyclic = config.get('add_cyclic', True)
         regional = config.get('regional', False)
-        zarr_store_url_tpl = config['zarr_store_url_tpl']
 
         cubes = iris.load(basedir / f'field.pp/apa.pp/{config["name"]}.apa_20200120T00.pp')
         land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask'))
@@ -278,7 +290,6 @@ class UMProcessTasks:
         add_cyclic = self.config.get('add_cyclic', True)
         regional = self.config.get('regional', False)
 
-        logger.trace((zoom, self.config['max_zoom']))
         if zoom == self.config['max_zoom']:
             # Gen weights path for regridding (only needed at max zoom) if it doesn't already exist.
             weights_path = self.config['weightsdir'] / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
@@ -297,20 +308,29 @@ class UMProcessTasks:
         else:
             cells = np.arange(npix)
 
-        if da.ndim == 3:
+        if da.dims == ('time', 'latitude', 'longitude'):
             dims = ['time', 'cell']
             coords = {zarr_time_name: zarr_time, 'cell': cells}
             shape = (len(zarr_time), len(cells))
-        elif da.ndim == 4:
+        elif (da.dims == ('time', 'pressure', 'latitude', 'longitude') or
+              da.dims == ('time', 'model_level_number', 'latitude', 'longitude')):
             dims = ['time', 'pressure', 'cell']
+            # Note this handles model_level_number as well so can't just pull these out of da.
             pressure_levels = [1, 5, 10, 20, 30, 50, 70, 100, 150, 200, 250, 300, 400, 500, 600, 700, 750,
                                800, 850, 875, 900, 925, 950, 975, 1000]
             coords = {zarr_time_name: zarr_time,
                       'pressure': (['pressure'], pressure_levels, {'units': 'hPa'}),
                       'cell': cells}
             shape = (len(zarr_time), len(pressure_levels), len(cells))
+        elif da.dims == ('time', 'depth', 'latitude', 'longitude'):
+            dims = ['time', 'depth', 'cell']
+            coords = {zarr_time_name: zarr_time,
+                      'depth': (['depth'], da.depth.values, {'units': 'm'}),
+                      'cell': cells}
+            shape = (len(zarr_time), len(da.depth), len(cells))
         else:
-            raise Exception('ndim must be 3 or 4')
+            logger.error(da.dims)
+            raise Exception('dims not recognized')
 
         # This is the idiom for using xarray to create a zarr entry with the correct dimensions but no actual data.
         # https://docs.xarray.dev/en/stable/user-guide/io.html#distributed-writes
@@ -345,7 +365,10 @@ class UMProcessTasks:
             for group_name, group in self.config['groups'].items()
         }
 
-        if not regional:
+        # TODO: Add orog back in!
+        add_orog = not regional and False
+
+        if add_orog:
             # TODO: handle regional.
             orog_land_sea = self._gen_orog_land_sea()
 
@@ -370,7 +393,7 @@ class UMProcessTasks:
                             metadata['bounds'] = get_regional_bounds(da)
                             logger.debug('bounds={}'.format(metadata['bounds']))
                     ds_tpls[zarr_store_name][da_tpl.name] = da_tpl
-                    if not regional:
+                    if add_orog:
                         ds_tpls[zarr_store_name]['orog'] = orog_land_sea[zoom].orog
                         ds_tpls[zarr_store_name]['sftlf'] = orog_land_sea[zoom].sftlf
 
@@ -395,7 +418,7 @@ class UMProcessTasks:
             s3=get_jasmin_s3(), check=False)
         logger.debug(store_url)
         logger.debug(ds_tpl)
-        ds_tpl.to_zarr(zarr_store, mode='w', compute=False)
+        ds_tpl.to_zarr(zarr_store, mode='w', compute=False, zarr_format=2, consolidated=True)
 
     def regrid(self, task):
         """Regrid all variables from lat/lon to healpix.
@@ -458,7 +481,7 @@ class UMProcessTasks:
                 # Write this variable to the zarr store.
                 zarr_store_name = group['zarr_store']
                 url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
-                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'])
+                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True)
 
     def coarsen_healpix_region(self, task):
         """Coarsen the regions from source to target zooms, as defined by the task."""
@@ -488,7 +511,11 @@ class UMProcessTasks:
 
         # This will create a cluster with its specifications taken from the current machine.
         # i.e. you can request a SLURM node with lots of CPUs etc and the cluster will reflect this.
-        cluster = LocalCluster()
+
+        # Use Slurm environment variables, defaulting to 1 if not found
+        n_tasks = int(os.environ.get('SLURM_NTASKS', 1))
+        cpus_per_task = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+        cluster = LocalCluster(n_workers=n_tasks, threads_per_worker=cpus_per_task)
         client = cluster.get_client()
         logger.debug(cluster)
         logger.debug(client)
@@ -517,11 +544,14 @@ def slurm_run(tasks, array_index):
     start = timer()
     task = tasks[array_index]
     logger.debug(task)
-    proc = UMProcessTasks(processing_config[task['config_key']])
-    if task['task_type'] == 'regrid':
-        proc.regrid(task)
-    elif task['task_type'] == 'create_empty_zarr_stores':
+    config_path = Path(task['config_path'])
+    config = load_config(config_path)
+
+    proc = UMProcessTasks(config.processing_config[task['config_key']], config.shared_metadata)
+    if task['task_type'] == 'create_empty_zarr_stores':
         proc.create_empty_zarr_stores(task)
+    elif task['task_type'] == 'regrid':
+        proc.regrid(task)
     elif task['task_type'] == 'coarsen':
         proc.coarsen_healpix_region(task)
     else:
@@ -548,6 +578,8 @@ def main():
                                                                dt.datetime.fromtimestamp(filepath.stat().st_mtime)))
 
     logger.debug(' '.join(sys.argv))
+    if len(sys.argv) == 5 and sys.argv[4] == 'debug_exc':
+        sys.excepthook = exception_info
 
     if sys.argv[1] == 'slurm':
         tasks_path = sys.argv[2]

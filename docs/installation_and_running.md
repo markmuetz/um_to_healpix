@@ -16,8 +16,8 @@ The recommended way to install is by cloning the git repo, creating a conda env,
 * `pip install -e .`
 
 ## Test processing command
-* This should have installed the `um_slurm_control` package which has a CLI entry point
-* `um_slurm_control --help`
+* This should have installed the `um-slurm-control` package which has a CLI entry point
+* `um-slurm-control --help`
 
 ## Access to JASMIN GWSs
 * You will need access to the `kscale` and `hrcm` GWSs
@@ -52,33 +52,26 @@ signature_v2 = False
 
 # Running processing
 Assumes that you are doing this on JASMIN, and that you have access to the `kscale` and `hrcm` (high-resolution climate modelling) GWSs, with access to the `hackathon-o` object store tenancy set up as above.
+Also assumes you are in the `um_to_healpix` root directory.
+
+* **Before you start** copy one of the config files in `config/` to e.g. `config/my_config.py`.
 
 * First, decide which simulation to process.
-  * `um_slurm_control ls`
+  * `um-slurm-control -C config/my_config.py ls`
   * Currently
-    * `glm.n1280_CoMA9
-glm.n2560_RAL3p3
-glm.n1280_GAL9_nest
-SAmer_km4p4_RAL3P3.n1280_GAL9_nest
-Africa_km4p4_RAL3P3.n1280_GAL9_nest
-SEA_km4p4_RAL3P3.n1280_GAL9_nest
-SAmer_km4p4_CoMA9_TBv1.n1280_GAL9_nest
-Africa_km4p4_CoMA9_TBv1.n1280_GAL9_nest
-SEA_km4p4_CoMA9_TBv1.n1280_GAL9_nest
-CTC_km4p4_RAL3P3.n1280_GAL9_nest
-CTC_km4p4_CoMA9_TBv1.n1280_GAL9_nest
+    * `glm.n2560_RAL3p3.tuned
 `
-* Then, make sure you have edited `src/um_to_healpix/um_processing_config.py`
+* Then, make sure you have edited your config file.
   * Edit `output_vn` and `deploy`
   * Changing either will force new processing (by using a different done file path)
   * It will also determine where the output is put in the JASMIN object store
   * You will need to edit the `weightsdir` and `donedir` to directories where you have write access.
 * You can view all config for a simulation:
-  * `um_slurm_control print-config glm.n1280_CoMA9`
+  * `um-slurm-control print-config glm.n2560_RAL3p3.tuned`
 * Set up a SLURM monitoring script on JASMIN to see progress
   * `watch -n10 squeue -u $USER`
 * Run the processing (e.g.):
-  * `um_slurm_control -D process glm.n2560_RAL3p3`
+  * `um-slurm-control -D process glm.n2560_RAL3p3.tuned`
   * On first run for unique `output_vn`/`deploy`, this will create an empty zarr store in the JASMIN object store
   * Other runs, the dates which have not been processed will be processed
     * A SLURM array is used, with a limit on the total number of jobs so as not to swamp the object store
