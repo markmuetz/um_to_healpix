@@ -1,3 +1,16 @@
+"""
+Test the hk26 data.
+
+To run these, you need to install remake:
+* git clone https://github.com/markmuetz/remake.git
+* cd remake
+* git checkout remake2
+* # Activate your Python env.
+* pip install -e .
+
+Then:
+* remake run hk26_testing_remakefile.py
+"""
 from pathlib import Path
 
 import numpy as np
@@ -14,7 +27,10 @@ import um_to_healpix.plotting as umplt
 
 rmk = Remake()
 
-SIMS = ['glm.n2560_RAL3p3.tuned', 'glm.n1280_CoMA9']
+# SIMS = ['glm.n2560_RAL3p3.tuned', 'glm.n1280_CoMA9']
+SIMS = ['glm.n2560_RAL3p3.tuned']
+
+config = load_config('../config/hk26_config.py')
 
 def zooms_for_sim(sim):
     if sim == 'glm.n2560_RAL3p3.tuned':
@@ -103,6 +119,7 @@ class PlotSanityChecks(Rule):
         fig_outputs.update({f'pr_med.z6': Path(f'outputs/figs/{sim}/pr_med.zonal_mean.z6.png')})
         fig_outputs.update({f'all_fields.z{zoom}': Path(f'outputs/figs/{sim}/all_fields.z{zoom}.png')
                             for zoom in zooms})
+        fig_outputs.update({f'clw_one_hour.z5': Path(f'outputs/figs/{sim}/clw_one_hour.z5.png')})
 
         outdirs = set(p.parent for p in fig_outputs.values())
         for outdir in outdirs:
@@ -114,6 +131,7 @@ class PlotSanityChecks(Rule):
         PlotSanityChecks.plot_pr_med(inputs, fig_outputs)
         PlotSanityChecks.plot_pr_long(inputs, fig_outputs)
         PlotSanityChecks.plot_all_fields(sim, inputs, fig_outputs)
+        PlotSanityChecks.plot_3D_ml_var(sim, fig_outputs)
 
         outputs['dummy'].touch()
 
@@ -168,4 +186,19 @@ class PlotSanityChecks(Rule):
             umplt.plot_all_fields(ds)
             plt.savefig(fig_outputs[f'all_fields.z{zoom}'])
 
+    @staticmethod
+    def plot_3D_ml_var(sim, fig_outputs):
+        # Not expensive to get - no need to cache.
+        # name_map_3d_ml is on model levels, i.e. interped fields.
+        assert ('clw', 'mass_fraction_of_cloud_liquid_water_in_air') in config.name_map_3d_ml
 
+        zoom = 5
+        time = '2020-01-25 00:00'
+        clw = open_remote_dataset(config, sim, freq='PT3H', zoom=zoom).clw.sel(time=time)
+        plt.figure()
+        plt.plot(clw.mean(dim='cell'), clw.pressure)
+        plt.ylim((1000, 0))
+        plt.xlabel(f'{clw.long_name} ({clw.attrs.get("units", "-")})')
+        plt.ylabel('pressure (hPa)')
+        plt.title(f'{time} - z{zoom}')
+        plt.savefig(fig_outputs[f'clw_one_hour.z{zoom}'])

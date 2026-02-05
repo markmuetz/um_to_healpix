@@ -378,7 +378,7 @@ def ls(ctx):
 @click.argument('config_key')
 @click.option('--date', '-d', default=None)
 @click.option('--output-file', '-o', default=None)
-@click.option('--interactive', '-I', default=False)
+@click.option('--interactive', '-I', is_flag=True)
 @click.pass_context
 def check_output_mapping(ctx, config_key, date, output_file, interactive):
     import iris
