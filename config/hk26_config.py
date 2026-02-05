@@ -1,9 +1,6 @@
 """Configuration used to control all aspects of regridding to saving files.
 
 creates a processing_config variable that has a key for each experiment.
-can be called directly with:
-python um_processing_config.py ls-keys
-python um_processing_config.py print-config <key> [dict_keys:]
 """
 import copy
 import operator
