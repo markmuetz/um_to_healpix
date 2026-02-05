@@ -242,9 +242,7 @@ class UMProcessTasks:
         max_zoom = config['max_zoom']
         add_cyclic = config.get('add_cyclic', True)
         regional = config.get('regional', False)
-        zarr_store_url_tpl = config['zarr_store_url_tpl']
 
-        apa_filname = config.get()
         cubes = iris.load(basedir / f'field.pp/apa.pp/{config["name"]}.apa_20200120T00.pp')
         land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask'))
         orog = xr.DataArray.from_iris(cubes.extract_cube('surface_altitude'))
