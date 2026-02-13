@@ -1,4 +1,6 @@
-"""Main script that handles all steps of the processing of UM lat/lon .pp data to healpix in a zarr store.
+"""Main orchestration for UM lat/lon -> HEALPix Zarr processing.
+
+This module coordinates the end-to-end workflow:
 
 1. Create empty zarr stores.
 2. Populate the highest zoom, region at a time.
@@ -38,12 +40,19 @@ from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited
 from .util import async_da_to_zarr_with_retries, load_config, exception_info
 
 # Super simple .s3cfg parser - must be in home directory.
+# Reads keys from ~/.s3cfg as "key = value" pairs.
 s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
 iris.FUTURE.date_microseconds = True
 
 
 def get_jasmin_s3():
-    """These objects seem to go stale after a period of time - recreate when needed"""
+    """Create a fresh authenticated S3 filesystem handle for JASMIN object store.
+
+    Notes
+    -----
+    These clients can become stale in long-running processes, so this helper
+    intentionally returns a new instance on each call.
+    """
     return s3fs.S3FileSystem(
         anon=False,
         secret=s3cfg['secret_key'],
@@ -53,6 +62,7 @@ def get_jasmin_s3():
 
 
 def get_crs(zoom):
+    """Return HEALPix CRS metadata as an xarray scalar DataArray."""
     return xr.DataArray(
         name="crs",
         attrs={
@@ -65,21 +75,47 @@ def get_crs(zoom):
 
 def regrid_da_to_healpix(da, zoom, short_name, long_name, weightsdir, drop_vars, add_cyclic=True,
                          regional=False, regional_chunks=None):
-    """Create a regridded DataArray at a given zoom level from the original lat/lon DataArray."""
+    """Regrid one lat/lon DataArray to HEALPix and annotate output metadata.
+
+    Parameters
+    ----------
+    da : xarray.DataArray
+        Source variable on lat/lon grid.
+    zoom : int
+        Target HEALPix zoom/order.
+    short_name, long_name : str
+        Output variable name and descriptive long name.
+    weightsdir : Path
+        Directory containing precomputed regridding weights.
+    drop_vars : list[str]
+        Coordinate/aux variables to remove before cyclic padding/regridding.
+    add_cyclic : bool, default=True
+        Whether to add cyclic longitude point before interpolation.
+    regional : bool, default=False
+        Whether output should contain only regional chunk-aligned cells.
+    regional_chunks : int | None
+        Chunk size used by regional cell selection logic.
+    """
+    # Keep original UM source variable name in attrs for provenance.
     um_name = da.name
 
+    # Coordinate names can vary slightly (e.g. longitude_1), so match by prefix.
     lonname = [c for c in da.coords if c.startswith('longitude')][0]
     latname = [c for c in da.coords if c.startswith('latitude')][0]
+
+    # Select deterministic weights file based on source grid geometry + options.
     weights_path = weightsdir / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
     logger.trace(f'  - using weights: {weights_path}')
     regridder = LatLon2HealpixRegridder(weights_path=weights_path, method='easygems_delaunay', zoom_level=zoom,
                                         add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
 
     # These have to be dropped before you cyclic pad *some* data arrays, or you will get a coord mismatch.
+    # Drop only vars that are actually present for this DA.
     drop_vars_exists = list(set(drop_vars) & set(k for k in da.coords.keys()))
     logger.debug(f'dropping {drop_vars_exists}')
     da = da.drop_vars(drop_vars_exists)
 
+    # Perform regridding and set output metadata/naming.
     da_hp = regridder.regrid(da, lonname, latname)
     da_hp = da_hp.rename(short_name)
     da_hp.attrs['UM_name'] = um_name
@@ -91,10 +127,15 @@ def regrid_da_to_healpix(da, zoom, short_name, long_name, weightsdir, drop_vars,
 
 
 def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=False):
-    """Write a healpix DataArray to the store defined by the URL."""
+    """Write one HEALPix DataArray into the correct region of a Zarr store.
+
+    Time alignment is resolved by matching source data times to the target group
+    timeline and writing via xarray distributed region writes.
+    """
     name = da.name
     logger.info(f'{name} to zarr => {url}')
 
+    # Some variables are stored at hh:30; identify that coordinate if present.
     half_time = find_halfpast_time(da)
     # Match source (da) to target (zarr_store) times.
     # Get an index into zarr store to allow me to write block of da's data.
@@ -107,6 +148,7 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
     else:
         source_times_to_match = pd.DatetimeIndex(da[timename].values)
 
+    # Normalize to a canonical 'time' dimension expected in destination stores.
     da = da.rename(**{timename: 'time'})
     # Find index of first time from our source data in the full time index.
     idx = np.argmin(np.abs(source_times_to_match[0] - group_time))
@@ -116,6 +158,7 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
     logger.debug(
         f'writing {name} to zarr store {url} (idx={idx}, time={source_times_to_match[0]})')
     # Use time index to select a region to write data to.
+    # Region layout depends on variable group dimensionality.
     if group_name == '2d':
         region = {'time': slice(idx, idx + len(da['time'])), 'cell': slice(None)}
     elif group_name == '2d_depth':
@@ -127,6 +170,7 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
         raise ValueError(f'group name {group_name} not recognized')
 
     if nan_checks:
+        # Hard fail for all-NaN outputs; warn-only for partial NaNs in global runs.
         if np.isnan(da.values).all():
             logger.error(da)
             raise Exception(f'da {da.name} is full of NaNs')
@@ -137,11 +181,14 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
         root=url,
         s3=get_jasmin_s3(), check=False)
     # Handle errors if they arise (started happening on 26/4/25).
+    # Uses async retry wrapper to smooth intermittent object-store issues.
     asyncio.run(async_da_to_zarr_with_retries(da, zarr_store, region))
     return name
 
 
 def weights_filename(da, zoom, lonname, latname, add_cyclic, regional):
+    """Build deterministic weights filename from grid geometry/options."""
+    # Include lon/lat ranges and counts so files are unique to source grid layout.
     lon0, lonN = da[lonname].values[[0, -1]]
     lat0, latN = da[latname].values[[0, -1]]
     lonstr = f'({lon0.item():.3f},{lonN.item():.3f},{len(da[lonname])})'
@@ -151,6 +198,14 @@ def weights_filename(da, zoom, lonname, latname, add_cyclic, regional):
 
 
 def find_halfpast_time(ds):
+    """Return name of time-like coord whose timestamps are all at hh:30.
+
+    Returns
+    -------
+    str | None
+        Matching coordinate name, or ``None`` if no all-halfpast coord exists.
+    """
+    # Search all coords whose names begin with 'time'.
     times = {name: pd.DatetimeIndex(ds[name].values)
              for name in ds.coords if name.startswith('time')}
     for name, time in times.items():
@@ -160,6 +215,7 @@ def find_halfpast_time(ds):
 
 
 def get_regional_bounds(da):
+    """Extract rounded bbox metadata from a lat/lon DataArray, if available."""
     if 'latitude' in da.coords and 'longitude' in da.coords:
         bounds = {
             'lower_left_lat': float(round(da.latitude.values[0], 3)),
@@ -173,17 +229,21 @@ def get_regional_bounds(da):
 
 
 class UMProcessTasks:
+    """Task processor implementing zarr template creation, regridding, and coarsening."""
     def __init__(self, config, shared_metadata):
+        # Runtime config for a single processing profile (e.g., hk26).
         self.config = config
+        # Metadata shared across all output stores.
         self.shared_metadata = shared_metadata
         self.drop_vars = config['drop_vars']
         self.groups = config['groups']
 
+        # In-memory log capture for donepath/debug artifacts.
         self.debug_log = StringIO()
         logger.add(self.debug_log)
 
     def _initialize_metadata(self, regional):
-        """Initialize metadata dict with default and config values"""
+        """Assemble output dataset metadata from defaults + config + shared fields."""
         metadata = {
             **{
                 'bounds': None,
@@ -195,6 +255,7 @@ class UMProcessTasks:
             **self.shared_metadata,
         }
 
+        # For non-regional runs, set explicit full-global bounds.
         if not regional:
             metadata['bounds'] = {
                 'lower_left_lat': -90,
@@ -206,7 +267,11 @@ class UMProcessTasks:
 
     @staticmethod
     def _process_group_cubes(group_name, group, cubes):
-        """Process cubes for a group and convert to DataArrays"""
+        """Extract representative DataArrays for each mapped variable in a group.
+
+        This is primarily used when building empty template stores, where only
+        metadata/dimensions are needed (not full processed/regridded values).
+        """
         name_map = group['name_map']
         logger.info(f'Creating {group_name}')
         group_cubes = cubes.extract(group['constraint'])
@@ -218,11 +283,13 @@ class UMProcessTasks:
         for key, map_item in name_map.items():
             short_name, long_name = key
             try:
+                # Validate this mapping item can be extracted from current cube set.
                 cubes = extractor.extract_cubes(map_item, group_cubes)
             except iris.exceptions.ConstraintMismatchError:
                 missing_map_items.append(map_item)
 
             # Just use first cube here.
+            # For template creation we only need shape/coords/attrs scaffold.
             da = xr.DataArray.from_iris(cubes[0]).rename(short_name)
             da.attrs['long_name'] = long_name
             da.attrs.update(map_item.extra_attrs)
@@ -236,7 +303,13 @@ class UMProcessTasks:
     def _gen_orog_land_sea(self):
         """The format of orog and land_sea_mask are slightly different - handle them here.
 
-        generate orog_land_sea (static data) at each zoom level and return as dict."""
+        generate orog_land_sea (static data) at each zoom level and return as dict.
+
+        Returns
+        -------
+        dict[int, xarray.Dataset]
+            Per-zoom datasets containing static ``orog`` and ``sftlf`` fields.
+        """
         config = self.config
         basedir = config['basedir']
         max_zoom = config['max_zoom']
@@ -260,6 +333,7 @@ class UMProcessTasks:
 
         orog_land_sea = {}
 
+        # Build static fields for each zoom by iterative 4:1 coarsening.
         for zoom in range(max_zoom, -1, -1):
             if zoom != max_zoom:
                 # TODO: Get working for regional.
@@ -299,6 +373,7 @@ class UMProcessTasks:
                 gen_weights(da, weights_path=weights_path, zoom=zoom, lonname=lonname, latname=latname,
                             add_cyclic=add_cyclic, regional=regional, regional_chunks=chunks[-1])
         if regional:
+            # Regional output keeps only active chunk-aligned cells.
             minlon, maxlon = da[lonname].values[[0, -1]]
             minlat, maxlat = da[latname].values[[0, -1]]
             extent = [minlon, maxlon, minlat, maxlat]
@@ -308,6 +383,7 @@ class UMProcessTasks:
         else:
             cells = np.arange(npix)
 
+        # Infer output dimensions from source variable structure.
         if da.dims == ('time', 'latitude', 'longitude'):
             dims = ['time', 'cell']
             coords = {zarr_time_name: zarr_time, 'cell': cells}
@@ -336,6 +412,7 @@ class UMProcessTasks:
         # https://docs.xarray.dev/en/stable/user-guide/io.html#distributed-writes
         dummies = dask.array.zeros(shape, dtype=np.float32, chunks=chunks)
         da_tpl = xr.DataArray(dummies, dims=dims, coords=coords, name=da.name, attrs=da.attrs)
+        # Rename source time coord to template store convention.
         da_tpl = da_tpl.rename(**{timename: zarr_time_name})
         da_tpl.attrs['UM_name'] = da.name
         da_tpl.attrs['grid_mapping'] = 'healpix_nested'
@@ -353,6 +430,7 @@ class UMProcessTasks:
         `self._write_zarr_store` writes the datasets to the storage backend.
         """
         inpaths = task['inpaths']
+        # Load one representative set of files and derive output templates from it.
         cubes = iris.load(inpaths)
         logger.trace(cubes)
 
@@ -398,6 +476,7 @@ class UMProcessTasks:
                         ds_tpls[zarr_store_name]['sftlf'] = orog_land_sea[zoom].sftlf
 
                 if regional and zoom != self.config['max_zoom']:
+                    # For regional lower zoom stores, include a placeholder weights array.
                     coords = {n: c for n, c in da_tpl.coords.items() if not n == 'time'}
                     dummies = dask.array.zeros(da_tpl.shape[1:], dtype=np.float32, chunks=chunks[1:])
                     ds_tpls[zarr_store_name]['weights'] = xr.DataArray(dummies, name='weights', coords=coords)
@@ -406,7 +485,8 @@ class UMProcessTasks:
                 self._write_zarr_store(ds_tpl, zarr_store_name, zoom, metadata, task)
 
     def _write_zarr_store(self, ds_tpl, zarr_store_name, zoom, metadata, task):
-        """Write a zarr store for the dataset template"""
+        """Persist one template dataset as a consolidated Zarr store."""
+        # Attach CRS coordinate + top-level metadata before first write.
         ds_tpl = ds_tpl.assign_coords(crs=get_crs(zoom))
         ds_tpl.attrs.update(metadata)
 
@@ -418,6 +498,7 @@ class UMProcessTasks:
             s3=get_jasmin_s3(), check=False)
         logger.debug(store_url)
         logger.debug(ds_tpl)
+        # compute=False writes metadata/schema only, enabling later region writes.
         ds_tpl.to_zarr(zarr_store, mode='w', compute=False, zarr_format=2, consolidated=True)
 
     def regrid(self, task):
@@ -470,6 +551,7 @@ class UMProcessTasks:
                 logger.info(msg)
                 logger.info('=' * len(msg))
                 map_item = name_map[key]
+                # Extract + optional combine/processing according to declarative map.
                 da = extractor.extract_da(map_item, group_cubes)
 
                 zoom = self.config['max_zoom']
@@ -484,7 +566,7 @@ class UMProcessTasks:
                 healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True)
 
     def coarsen_healpix_region(self, task):
-        """Coarsen the regions from source to target zooms, as defined by the task."""
+            """Coarsen one source zoom dataset into a lower target zoom by time chunks."""
         dim = task['dim']
         tgt_zoom = task['tgt_zoom']
         src_zoom = tgt_zoom + 1
@@ -515,12 +597,14 @@ class UMProcessTasks:
         # Use Slurm environment variables, defaulting to 1 if not found
         n_tasks = int(os.environ.get('SLURM_NTASKS', 1))
         cpus_per_task = int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+        # Local dask cluster sized from allocated SLURM resources.
         cluster = LocalCluster(n_workers=n_tasks, threads_per_worker=cpus_per_task)
         client = cluster.get_client()
         logger.debug(cluster)
         logger.debug(client)
 
         for subtask in task['tgt_times']:
+            # Capture per-subtask logs and write them to donepath for audit/resume.
             subtask_log = StringIO()
             logger_id = logger.add(subtask_log)
 
@@ -540,7 +624,7 @@ class UMProcessTasks:
 
 
 def slurm_run(tasks, array_index):
-    """Dispatch the task to the processing method."""
+    """Dispatch a single task entry (typically SLURM array element)."""
     start = timer()
     task = tasks[array_index]
     logger.debug(task)
@@ -568,6 +652,7 @@ def slurm_run(tasks, array_index):
 
 
 def main():
+    """CLI entrypoint for SLURM-driven task execution."""
     logger.remove()
     custom_fmt = ("<green>{time:YYYY-MM-DD HH:mm:ss.SSS}</green> | "
                   "<level>{level: <8}</level> | "
@@ -579,6 +664,7 @@ def main():
 
     logger.debug(' '.join(sys.argv))
     if len(sys.argv) == 5 and sys.argv[4] == 'debug_exc':
+        # Optional interactive post-mortem debugger hook.
         sys.excepthook = exception_info
 
     if sys.argv[1] == 'slurm':

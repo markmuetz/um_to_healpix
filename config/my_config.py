@@ -37,7 +37,7 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
 # - done-file namespaces
 # - output object-store paths
 # Bumping this creates a new processing lineage.
-output_vn = 'v6.1'
+output_vn = 'v6.2'
 
 # Deployment namespace used in object-store and done-file locations.
 # Common examples are 'dev' or 'prod'-like environments.
@@ -47,10 +47,10 @@ deploy = 'dev'
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
 
 # Location where HEALPix remapping weights are stored/reused.
-weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
+weightsdir = Path('/gws/nopw/j04/hrcm/sharar/weights/')
 
 # Location of donefiles. Delete to rerun a particular task.
-donedir = Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}')
+donedir = Path(f'/gws/nopw/j04/hrcm/sharar/slurm_done/{deploy}')
 
 # ---------------------------------------------------------------------------
 # DEFAULT SLURM SETTINGS

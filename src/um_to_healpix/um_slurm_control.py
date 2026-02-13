@@ -21,6 +21,7 @@ from .cube_to_da_mapping import DataArrayExtractor
 from .util import sysrun, load_config, exception_info
 
 # SLURB script template - filled in and written to a file for calling with `sbatch`.
+# This template is used for all array-based task submissions.
 SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH --job-name="{job_name}"
 #SBATCH --time={time}
@@ -55,16 +56,30 @@ um-process-tasks slurm {tasks_path} ${{ARRAY_INDEX}}
 """
 
 def sbatch(slurm_script_path):
-    """Submit script using sbatch."""
+    """Submit a SLURM script and return its job id string.
+
+    Parameters
+    ----------
+    slurm_script_path : str | Path
+        Path to a generated ``.sh`` script.
+
+    Returns
+    -------
+    str
+        Job id returned by ``sbatch --parsable``.
+    """
     try:
         return sysrun(f'sbatch --parsable {slurm_script_path}').stdout.strip()
     except sp.CalledProcessError as e:
+        # Log and re-raise so callers can decide whether to abort or continue.
         logger.error(f'sbatch failed with exit code {e.returncode}')
         logger.error(e)
         raise
 
 
 def _parse_date_from_pp_path(path):
+    """Extract timestamp from a UM ``.pp`` filename and parse to Timestamp."""
+    # Expected stem format includes date fragment like ..._YYYYmmddTHHMMZ or ..._YYYYmmddTHH.
     datestr = path.stem.split('.')[-1].split('_')[1]
     if datestr[-1] == 'Z':
         return pd.to_datetime(datestr, format="%Y%m%dT%H%MZ")
@@ -73,14 +88,38 @@ def _parse_date_from_pp_path(path):
 
 
 def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, **kwargs):
-    """Write out a script for submission."""
+    """Write task JSON + matching SLURM array script for submission.
+
+    Parameters
+    ----------
+    slurm_config : dict
+        Baseline SLURM resource/options configuration.
+    config_key : str
+        Processing config key embedded into file names/comments.
+    tasks : list[dict]
+        Task payload list consumed by ``um-process-tasks``.
+    job_name : str
+        Logical job label used for script/log naming.
+    depends_on : str | None, optional
+        Upstream SLURM job id for ``afterok`` dependency.
+    **kwargs
+        Per-call SLURM overrides merged into ``slurm_config``.
+
+    Returns
+    -------
+    pathlib.Path
+        Path to generated SLURM script.
+    """
+    # Timestamp suffix keeps artifacts unique and traceable.
     now = pd.Timestamp.now()
     date_string = now.strftime("%Y%m%d_%H%M%S")
 
+    # Persist task payload so array workers can index into a stable JSON file.
     tasks_path = Path(f'slurm/tasks/tasks_{job_name}_{config_key}_{date_string}.json')
     logger.debug(tasks_path)
     logger.trace(json.dumps(tasks, indent=4))
 
+    # Optional dependency line for serialized pipelines.
     if depends_on:
         dependency = f'#SBATCH --dependency=afterok:{depends_on}'
     else:
@@ -91,6 +130,7 @@ def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depen
 
     comment = f'{config_key},{job_name}'
 
+    # Build script path and parameters for template rendering.
     slurm_script_path = Path(f'slurm/scripts/script_{job_name}_{config_key}_{date_string}.sh')
     njobs = len(tasks) - 1
     slurm_kwargs = {**slurm_config, **kwargs}
@@ -110,7 +150,18 @@ def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depen
 
 
 def find_dyamond3_pp_dates_to_paths(basedir):
-    """Search for pp_paths with a specific date (N.B. filename sensitive)."""
+    """Scan DYAMOND3 ``.pp`` files and group complete date sets.
+
+    Parameters
+    ----------
+    basedir : Path
+        Base experiment directory containing ``field.pp`` streams.
+
+    Returns
+    -------
+    dict[pandas.Timestamp, list[pathlib.Path]]
+        Mapping of date -> list of exactly 4 stream files (completed downloads).
+    """
     pp_paths = sorted(basedir.glob('field.pp/apve*/**/*.pp'))
     logger.debug(f'found {len(pp_paths)} pp paths')
     pp_paths = [p for p in pp_paths if p.is_file()]
@@ -122,6 +173,7 @@ def find_dyamond3_pp_dates_to_paths(basedir):
             continue
         dates_to_paths[_parse_date_from_pp_path(path)].append(path)
     # Only keep completed downloads.
+    # Current assumption: a complete date contains 4 streams (a-d).
     dates_to_paths = {
         k: v for k, v in dates_to_paths.items()
         if len(v) == 4
@@ -131,6 +183,7 @@ def find_dyamond3_pp_dates_to_paths(basedir):
 
 
 def write_jobids(jobids):
+    """Persist submitted SLURM job ids to a timestamped JSON file."""
     now = pd.Timestamp.now()
     date_string = now.strftime("%Y%m%d_%H%M%S")
     jobids_path = Path(f'slurm/jobids/jobids_{date_string}.json')
@@ -148,11 +201,15 @@ def write_jobids(jobids):
 @click.option('--nconcurrent-tasks', '-N', default=40, type=int)
 @click.pass_context
 def cli(ctx, config, dry_run, debug_exception, debug, trace, nconcurrent_tasks):
+    """Top-level CLI configuration shared by all subcommands."""
     ctx.ensure_object(dict)
+    # Load and cache config object once.
     ctx.obj['config_path'] = str(config)
     ctx.obj['config'] = load_config(config)
     ctx.obj['dry_run'] = dry_run
     ctx.obj['nconcurrent_tasks'] = nconcurrent_tasks
+
+    # Configure log verbosity from flags.
     logger.remove()
     if trace:
         logger.add(sys.stderr, level="TRACE")
@@ -168,6 +225,7 @@ def cli(ctx, config, dry_run, debug_exception, debug, trace, nconcurrent_tasks):
         # Handle top-level exceptions with a debugger.
         sys.excepthook = exception_info
 
+    # Ensure output directories exist for generated artifacts.
     for path in ['slurm/tasks', 'slurm/scripts', 'slurm/output', 'slurm/jobids/']:
         path = Path(path)
         if not path.exists():
@@ -177,7 +235,8 @@ def cli(ctx, config, dry_run, debug_exception, debug, trace, nconcurrent_tasks):
 @cli.result_callback()
 @click.pass_context
 def cli_exit(ctx, result, **kwargs):
-    # This runs after any subcommand completes
+    """Post-command hook for final informational messages."""
+    # This runs after any subcommand completes.
     if ctx.obj['dry_run']:
         logger.warning("Dry run: not launching any jobs")
 
@@ -187,6 +246,7 @@ def cli_exit(ctx, result, **kwargs):
 @click.argument('config_key')
 @click.pass_context
 def process(ctx, endtime, config_key):
+    """Create and submit create-store/regrid task arrays for a config key."""
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
 
     logger.debug(f'using {nconcurrent_tasks} concurrent tasks')
@@ -206,6 +266,7 @@ def process(ctx, endtime, config_key):
     jobids = []
 
     # Build a list of tasks for all donepaths that don't exist.
+    # Also submit one optional create-empty-store task at first_date.
     tasks = []
     for date in dates_to_paths:
         if date > endtime:
@@ -230,6 +291,7 @@ def process(ctx, endtime, config_key):
                 logger.debug(slurm_script_path)
                 create_donepath.parent.mkdir(parents=True, exist_ok=True)
                 if not ctx.obj['dry_run']:
+                    # Submit initializer first so regrid can depend on it.
                     create_jobid = sbatch(slurm_script_path)
                     logger.info(f'create empty zarr stores jobid: {create_jobid}')
                     jobids.append(create_jobid)
@@ -281,6 +343,8 @@ def process(ctx, endtime, config_key):
 @click.argument('config_key')
 @click.pass_context
 def coarsen(ctx, dims, nbatch, endtime, config_key):
+    """Create and submit coarsening task arrays across dims and zoom levels."""
+    # Normalize dim selector.
     if dims == 'both':
         dims = ['2d', '3d']
     else:
@@ -295,6 +359,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
     max_zoom = config['max_zoom']
 
     for dim in dims:
+        # Chain zoom jobs via dependency so z+1 finishes before z begins.
         prev_zoom_job_id = None
         if dim == '2d':
             time_idx = ctx.obj['config'].time2d
@@ -312,6 +377,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
             tasks = []
             timechunk = chunks[zoom][0]
             logger.debug(f'timechunk: {timechunk}')
+            # Number of target time chunks for this zoom.
             njobs = int(math.ceil(len(time_idx) / timechunk))
             job_idx = [
                 i for i in range(njobs)
@@ -325,6 +391,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
                 }
                 for i in job_idx
             ]
+            # Batch fine-grained time slices into larger array tasks.
             for tgt_times in batched(tgt_time_calcs, nbatch):
                 tasks.append(
                     {
@@ -338,6 +405,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
                 )
             if len(tasks):
                 logger.info(f'- running {len(tasks)} tasks')
+                # Heavier memory request for 3d coarsening.
                 if dim == '3d':
                     mem = 100000
                 else:
@@ -360,6 +428,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
                 logger.debug(slurm_script_path)
 
                 if not ctx.obj['dry_run']:
+                    # Downstream zoom depends on successful completion of current zoom.
                     prev_zoom_job_id = sbatch(slurm_script_path)
                 jobids.append(prev_zoom_job_id)
 
@@ -370,6 +439,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
 @cli.command()
 @click.pass_context
 def ls(ctx):
+    """List available processing config keys."""
     for key in ctx.obj['config'].processing_config:
         print(key)
 
@@ -381,6 +451,11 @@ def ls(ctx):
 @click.option('--interactive', '-I', default=False)
 @click.pass_context
 def check_output_mapping(ctx, config_key, date, output_file, interactive):
+    """Inspect mapping definitions against available source cubes.
+
+    Produces a table indicating whether each configured output variable can be
+    extracted, plus source cube/stash provenance strings.
+    """
     import iris
     import operator
 
@@ -424,6 +499,7 @@ def check_output_mapping(ctx, config_key, date, output_file, interactive):
                 logger.debug(f'  {key}: {map_item}')
                 short_name, long_name = key
                 try:
+                    # Validate extraction and capture provenance (single/multi-cube).
                     item_cubes = extractor.extract_cubes(map_item, group_cubes)
                     if len(item_cubes) == 1:
                         cube = item_cubes[0]
@@ -443,6 +519,7 @@ def check_output_mapping(ctx, config_key, date, output_file, interactive):
                         str(v) for v in [config_key, store, short_name, long_name, True, cubestr, stashstr, map_item.extra_attrs]
                     )
                 except iris.exceptions.ConstraintMismatchError as cme:
+                    # Mapping entry not present in this dataset/date.
                     data.append(
                         str(v) for v in [config_key, store, short_name, long_name, False, None, None, map_item.extra_attrs]
                     )
@@ -457,6 +534,7 @@ def check_output_mapping(ctx, config_key, date, output_file, interactive):
 
 
 def title(msg):
+    """Print a section title with underline."""
     print(msg)
     print('=' * len(msg))
 
@@ -464,8 +542,10 @@ def title(msg):
 @click.option('--input-file', '-i')
 @click.pass_context
 def analyse_output_mapping(ctx, input_file):
+    """Analyze mapping table consistency across experiments/configs."""
     df = pd.read_csv(input_file)
 
+    # Number of distinct experiments represented in input.
     N = len(df.expt.unique())
     comparison_cols = df.drop(columns='expt')
     # Get a df with the number of times each row (ignoring 'expt') is duplicated and combine with existing df.
@@ -496,6 +576,8 @@ def analyse_output_mapping(ctx, input_file):
 @click.option('--list-keys', '-L', is_flag=True)
 @click.pass_context
 def print_config(ctx, list_keys, args):
+    """Print nested processing config values by key path."""
+    # args[0] is config_key; subsequent args navigate nested dict keys.
     config = ctx.obj['config'].processing_config[args[0]]
     for dict_key in args[1:]:
         try:
