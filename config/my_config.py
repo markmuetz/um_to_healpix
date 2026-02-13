@@ -47,7 +47,7 @@ deploy = 'dev'
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
 
 # Location where HEALPix remapping weights are stored/reused.
-weightsdir = Path('/gws/nopw/j04/hrcm/sharar/weights/')
+weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
 
 # Location of donefiles. Delete to rerun a particular task.
 donedir = Path(f'/gws/nopw/j04/hrcm/sharar/slurm_done/{deploy}')
