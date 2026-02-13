@@ -566,7 +566,7 @@ class UMProcessTasks:
                 healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True)
 
     def coarsen_healpix_region(self, task):
-            """Coarsen one source zoom dataset into a lower target zoom by time chunks."""
+        """Coarsen one source zoom dataset into a lower target zoom by time chunks."""
         dim = task['dim']
         tgt_zoom = task['tgt_zoom']
         src_zoom = tgt_zoom + 1
