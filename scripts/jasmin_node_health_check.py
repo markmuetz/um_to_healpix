@@ -102,7 +102,7 @@ def target(target, hostnames):
         jobids.append(sbatch(hostname, slurm_script_path))
     # print(jobids)
     # jobids_range = f'{jobids[0]}..{jobids[-1]}'
-    print("sacct -P -o 'jobid%20,start,end,elapsed,state,MaxRSS,NodeList' --name=jNodeHlth|grep -E '^[0-9_]*\.batch\|'")
+    print(r"sacct -P -o 'jobid%20,start,end,elapsed,state,MaxRSS,NodeList' --name=jNodeHlth|grep -E '^[0-9_]*\.batch\|'")
 
 @cli.command
 def sacct():
