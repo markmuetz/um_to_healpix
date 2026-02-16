@@ -59,9 +59,9 @@ donedir = Path(f'/gws/nopw/j04/hrcm/sharar/slurm_done/{deploy}')
 # externally when dispatching specific jobs/workloads.
 slurm_config = dict(
     account='hrcm',
-    nodes=4,
-    ntasks_per_node=4,  # 4 tasks per node (not total!) = 16 tasks across 4 nodes
-    cpus_per_task=6,
+    nodes=2,              # Reduce nodes for better resource locality
+    ntasks_per_node=8,    # 16 total tasks = 16 Dask workers for coarsen
+    cpus_per_task=6,      # 16 × 6 = 96 CPUs
     partition='standard',
     qos='high',
     time='24:00:00',
