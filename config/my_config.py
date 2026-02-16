@@ -29,8 +29,6 @@ import pandas as pd
 from um_to_healpix.cube_to_da_mapping import MapItem, MultiMapItem
 from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cube_cell_method_is_empty, \
     invert_cube_sign, check_cube_time_length
-which file and which lines of the code?
-
 
 # ---------------------------------------------------------------------------
 # GLOBAL SWITCHES AND ROOT PATHS
