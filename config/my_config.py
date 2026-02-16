@@ -65,9 +65,11 @@ slurm_config = dict(
     partition='standard',
     qos='high',
     time='24:00:00',
-    mem=100000,
+    mem=60000,  # Reduced from 100GB to 60GB - sufficient for most operations
     # Concurrency cap to avoid overwhelming shared object-store services.
-    nconcurrent_tasks=40,
+    # Reduced from 40 to 20: still massive parallelism (20 × 96 CPUs = 1920 CPUs)
+    # but less S3 write contention.
+    nconcurrent_tasks=20,
 )
 
 # ---------------------------------------------------------------------------
