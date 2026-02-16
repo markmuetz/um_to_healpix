@@ -53,6 +53,11 @@ fi
 
 ARRAY_INDEX=${{SLURM_ARRAY_TASK_ID}}
 
+# Enable threaded BLAS/LAPACK for numpy/scipy operations (regridding)
+export OMP_NUM_THREADS=${{SLURM_CPUS_PER_TASK}}
+export MKL_NUM_THREADS=${{SLURM_CPUS_PER_TASK}}
+export OPENBLAS_NUM_THREADS=${{SLURM_CPUS_PER_TASK}}
+
 um-process-tasks slurm {tasks_path} ${{ARRAY_INDEX}}
 """
 
