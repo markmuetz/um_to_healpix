@@ -29,6 +29,8 @@ import pandas as pd
 from um_to_healpix.cube_to_da_mapping import MapItem, MultiMapItem
 from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cube_cell_method_is_empty, \
     invert_cube_sign, check_cube_time_length
+which file and which lines of the code?
+
 
 # ---------------------------------------------------------------------------
 # GLOBAL SWITCHES AND ROOT PATHS
@@ -59,10 +61,11 @@ donedir = Path(f'/gws/nopw/j04/hrcm/sharar/slurm_done/{deploy}')
 # externally when dispatching specific jobs/workloads.
 slurm_config = dict(
     account='hrcm',
-    ntasks=1,
-    cpus_per_task=1,
+    nodes=4,
+    ntasks=4,
+    cpus_per_task=6,
     partition='standard',
-    qos='standard',
+    qos='high',
     time='24:00:00',
     mem=100000,
     # Concurrency cap to avoid overwhelming shared object-store services.

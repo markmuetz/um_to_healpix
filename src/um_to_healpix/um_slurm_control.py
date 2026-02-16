@@ -27,6 +27,7 @@ SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH --time={time}
 #SBATCH --mem={mem}
 #SBATCH --account={account}
+#SBATCH --nodes={nodes}
 #SBATCH --ntasks={ntasks}
 #SBATCH --cpus-per-task={cpus_per_task}
 #SBATCH --partition={partition}
