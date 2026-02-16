@@ -519,11 +519,15 @@ class UMProcessTasks:
            * do the regridding
            * save to zarr store
         """
+        t_start = timer()
         inpaths = task['inpaths']
 
         logger.info('loading cubes')
         logger.trace(inpaths)
+        t_load_start = timer()
         cubes = iris.load(inpaths)
+        t_load = timer() - t_load_start
+        logger.info(f'Cube loading took {t_load:.1f}s')
 
         add_cyclic = self.config.get('add_cyclic', True)
         regional = self.config.get('regional', False)
@@ -534,6 +538,7 @@ class UMProcessTasks:
         extractor = DataArrayExtractor(p, z)
 
         for group_name, group in self.groups.items():
+            t_group_start = timer()
             logger.info(f'processing group {group_name}')
             group_constraint = group['constraint']
             name_map = group['name_map']
@@ -545,6 +550,7 @@ class UMProcessTasks:
             # There might be multiple cubes required for a single dataarray due to the need to e.g. combine snow/rain.
             # extractor will handle these.
             for i, key in enumerate(name_map):
+                t_var_start = timer()
                 short_name, long_name = key
                 msg = f'{(i + 1)}/{len(name_map)}: regridding {short_name}'
                 logger.info('=' * len(msg))
@@ -564,6 +570,15 @@ class UMProcessTasks:
                 zarr_store_name = group['zarr_store']
                 url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
                 healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True)
+                
+                t_var = timer() - t_var_start
+                logger.info(f'{short_name} completed in {t_var:.1f}s')
+            
+            t_group = timer() - t_group_start
+            logger.info(f'{group_name} group completed in {t_group:.1f}s ({len(name_map)} variables)')
+        
+        t_total = timer() - t_start
+        logger.info(f'REGRID TASK TOTAL TIME: {t_total:.1f}s')
 
     def coarsen_healpix_region(self, task):
         """Coarsen one source zoom dataset into a lower target zoom by time chunks."""
