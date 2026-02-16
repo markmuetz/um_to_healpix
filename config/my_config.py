@@ -60,15 +60,15 @@ donedir = Path(f'/gws/nopw/j04/hrcm/sharar/slurm_done/{deploy}')
 slurm_config = dict(
     account='hrcm',
     nodes=4,
-    ntasks=4,
+    ntasks_per_node=4,  # 4 tasks per node (not total!) = 16 tasks across 4 nodes
     cpus_per_task=6,
     partition='standard',
     qos='high',
     time='24:00:00',
     mem=60000,  # Reduced from 100GB to 60GB - sufficient for most operations
     # Concurrency cap to avoid overwhelming shared object-store services.
-    # Reduced from 40 to 20: still massive parallelism (20 × 96 CPUs = 1920 CPUs)
-    # but less S3 write contention.
+    # With 4 nodes × 4 tasks × 6 CPUs = 96 CPUs per array task
+    # 20 concurrent = 1920 total CPUs, less S3 contention than 40.
     nconcurrent_tasks=20,
 )
 
