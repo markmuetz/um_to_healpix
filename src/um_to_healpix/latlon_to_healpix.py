@@ -114,7 +114,12 @@ def gen_weights(da, weights_path, zoom=10, lonname='longitude', latname='latitud
     da_flat = da.stack(cell=(lonname, latname))
 
     logger.info('computing weights')
-    weights = egr.compute_weights_delaunay((da_flat[lonname].values, da_flat[latname].values), (hp_lon, hp_lat))
+    lon = da_flat[lonname].values
+    lat = da_flat[latname].values
+    # Points at -90 or 90 make this crash. Apply small offset.
+    # lat = np.where(lat == 90, 89.986, lat)
+    # lat = np.where(lat == -90, -89.986, lat)
+    weights = egr.compute_weights_delaunay((lon, lat), (hp_lon, hp_lat))
     logger.debug(weights)
     weights.to_netcdf(weights_path)
     logger.info(f'saved weights to {weights_path}')
@@ -123,21 +128,21 @@ def gen_weights(da, weights_path, zoom=10, lonname='longitude', latname='latitud
 class LatLon2HealpixRegridder:
     """Regrid (UM) lat/lon .pp files to healpix .nc"""
 
-    def __init__(self, weights_path, method='easygems_delaunay', zoom_level=10, add_cyclic=True, regional=False,
-                 regional_chunks=None):
+    def __init__(self, weights, method='easygems_delaunay', zoom_level=10, add_cyclic=True, regional=False,
+                 regional_chunks=None, nproc=None):
         """Initate a regridder for a particular method/zoom levels.
         """
-        if method not in ['easygems_delaunay', 'earth2grid']:
-            raise ValueError('method must be either easygems_delaunay or earth2grid')
+        if method not in ['easygems_delaunay', 'easygems_delaunay_parallel', 'earth2grid']:
+            raise ValueError('method must be either easygems_delaunay, easygems_delaunay_parallel or earth2grid')
         self.method = method
         self.zoom_level = zoom_level
         self.add_cyclic = add_cyclic
-        self.weights_path = weights_path
         self.regional = regional
         if self.regional:
             self.regional_chunks = regional_chunks
-        if method == 'easygems_delaunay':
-            self.weights = xr.load_dataset(self.weights_path)
+        if method.startswith('easygems_delaunay'):
+            self.weights = weights
+        self.nproc = nproc
 
     def regrid(self, da, lonname, latname):
         """Do the regridding - set up common data to allow looping over all dims that are not lat/lon
@@ -164,6 +169,8 @@ class LatLon2HealpixRegridder:
         logger.trace(f'  - {dim_len}')
         if self.method == 'easygems_delaunay':
             self._regrid_easygems_delaunay(da, dim_ranges, regridded_data, lonname, latname)
+        elif self.method == 'easygems_delaunay_parallel':
+            self._regrid_easygems_delaunay_parallel(da, dim_ranges, regridded_data, lonname, latname)
         elif self.method == 'earth2grid':
             self._regrid_earth2grid(da, dim_ranges, regridded_data, lonname, latname)
         coords = {**coords, 'cell': cells}
@@ -180,9 +187,9 @@ class LatLon2HealpixRegridder:
         daout.attrs['regrid_method'] = self.method
         return daout
 
-    def _regrid_easygems_delaunay(self, da, dim_ranges, regridded_data, lonname, latname, regional=False):
+    def _regrid_easygems_delaunay(self, da, dim_ranges, regridded_data, lonname, latname):
         """Use precomputed weights file to do Delaunay regridding."""
-        da_flat = da.stack(cell=(lonname, latname))
+        da_flat = da.stack(latloncell=(lonname, latname))
         if self.regional:
             _, _, icell = get_regional_cell_idx(get_extent(da, lonname, latname), self.zoom_level)
             _, _, ichunk = get_limited_healpix(get_extent(da, lonname, latname), self.zoom_level, self.regional_chunks)
@@ -199,11 +206,59 @@ class LatLon2HealpixRegridder:
                 # both index a full field. Use this fact to convert between them.
                 # We can get away with only allocating field once.
                 # !!! NOTE: MASSIVELY FASTER IF I PASS IN .values !!!
+                # It is faster to do da_flat[idx].values rather than da_flat.values[idx]
                 field[icell] = egr.apply_weights(da_flat[idx].values, **self.weights)
+
                 regridded_data[idx] = field[ichunk]
-                # raise Exception()
             else:
+                # It is faster to do da_flat[idx].values rather than da_flat.values[idx]
                 regridded_data[idx] = egr.apply_weights(da_flat[idx].values, **self.weights)
+
+    def _regrid_easygems_delaunay_apply_ufunc(self, da, dim_ranges, regridded_data, lonname, latname):
+        raise NotImplemented
+        da_flat = da.stack(latloncell=(lonname, latname))
+        # dask_data = dask.array.from_array(da_flat, chunks={"time": 1}, inline_array=False)
+        # da_lazy = xr.DataArray(dask_data, coords=da_flat.coords, dims=da_flat.dims, attrs=da_flat.attrs)
+
+        regridded_data[:] = xr.apply_ufunc(
+            egr.apply_weights,
+            da_flat,
+            kwargs=self.weights,
+            input_core_dims=[['latloncell']],  # The dimension to operate over
+            output_core_dims=[['cell']],  # The new dimension created by the function
+            vectorize=True,  # Mimics your loop over non-core dimensions
+            dask='parallelized',  # Optional: enables parallel execution if using Dask
+            output_dtypes=[da_flat.dtype],
+            dask_gufunc_kwargs={
+                'output_sizes': {'cell': self.weights['tgt_idx'].size}
+            }
+        )
+
+    def _regrid_easygems_delaunay_parallel(self, da, dim_ranges, regridded_data, lonname, latname):
+        from joblib import Parallel, delayed
+
+        if self.regional:
+            raise NotImplemented
+
+        da_flat = da.stack(latloncell=(lonname, latname))
+
+        # Strip metadata once to maximize speed
+        data_buffer = np.ascontiguousarray(da_flat.values)
+        # Ensure weights are numpy to avoid overhead in the loop
+        weights_np = {k: (v.values if hasattr(v, 'values') else v) for k, v in self.weights.items()}
+        weights_np['weights'] = weights_np['weights'].astype(np.float32)
+
+        def parallel_regrid(idx):
+            # egr.apply_weights releases the GIL during the sum/multiply
+            return egr.apply_weights(data_buffer[idx], **weights_np)
+
+        # Use 'threads' to avoid memory copying of the array
+        logger.debug(f'{self.nproc=}')
+        results = Parallel(n_jobs=self.nproc, prefer="threads")(
+            delayed(parallel_regrid)(idx) for idx in product(*dim_ranges)
+        )
+
+        regridded_data[:] = np.array(results).reshape(regridded_data.shape)
 
     def _regrid_earth2grid(self, da, dim_ranges, regridded_data, lonname, latname):
         """Use earth2grid (which uses torch) to do regridding."""

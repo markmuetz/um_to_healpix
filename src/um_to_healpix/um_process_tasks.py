@@ -63,16 +63,19 @@ def get_crs(zoom):
     )
 
 
-def regrid_da_to_healpix(da, zoom, short_name, long_name, weightsdir, drop_vars, add_cyclic=True,
+def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, add_cyclic=True,
                          regional=False, regional_chunks=None):
     """Create a regridded DataArray at a given zoom level from the original lat/lon DataArray."""
     um_name = da.name
 
     lonname = [c for c in da.coords if c.startswith('longitude')][0]
     latname = [c for c in da.coords if c.startswith('latitude')][0]
-    weights_path = weightsdir / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
-    logger.trace(f'  - using weights: {weights_path}')
-    regridder = LatLon2HealpixRegridder(weights_path=weights_path, method='easygems_delaunay', zoom_level=zoom,
+    # weights_path = weightsdir / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
+    logger.trace(f'  - using weights: {weights}')
+
+    # regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay', zoom_level=zoom,
+    #                                     add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
+    regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay_parallel', nproc=6, zoom_level=zoom,
                                         add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
 
     # These have to be dropped before you cyclic pad *some* data arrays, or you will get a coord mismatch.
@@ -144,8 +147,8 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
 def weights_filename(da, zoom, lonname, latname, add_cyclic, regional):
     lon0, lonN = da[lonname].values[[0, -1]]
     lat0, latN = da[latname].values[[0, -1]]
-    lonstr = f'({lon0.item():.3f},{lonN.item():.3f},{len(da[lonname])})'
-    latstr = f'({lat0.item():.3f},{latN.item():.3f},{len(da[latname])})'
+    lonstr = f'{lon0.item():.3f}_{lonN.item():.3f}_{len(da[lonname])}'
+    latstr = f'{lat0.item():.3f}_{latN.item():.3f}_{len(da[latname])}'
 
     return f'regrid_weights.hpz{zoom}.cyclic_lon={add_cyclic}.regional={regional}.lon={lonstr}.lat={latstr}.nc'
 
@@ -465,6 +468,9 @@ class UMProcessTasks:
             # extractor will handle these.
             for i, key in enumerate(name_map):
                 short_name, long_name = key
+                if short_name == 'mrso':
+                    # TODO!!!
+                    continue
                 msg = f'{(i + 1)}/{len(name_map)}: regridding {short_name}'
                 logger.info('=' * len(msg))
                 logger.info(msg)
@@ -474,8 +480,12 @@ class UMProcessTasks:
 
                 zoom = self.config['max_zoom']
                 # Do the regridding.
+                lonname = [c for c in da.coords if c.startswith('longitude')][0]
+                latname = [c for c in da.coords if c.startswith('latitude')][0]
+                weights_path = self.config['weightsdir'] / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
+                weights = xr.load_dataset(weights_path)
                 da_hp = regrid_da_to_healpix(da, zoom, short_name, long_name,
-                                             self.config['weightsdir'], self.drop_vars,
+                                             weights, self.drop_vars,
                                              add_cyclic,
                                              regional, regional_chunks=chunks[-1])
                 # Write this variable to the zarr store.

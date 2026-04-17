@@ -14,13 +14,17 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
     invert_cube_sign, check_cube_time_length
 
 # Global config.
-output_vn = 'v6.1'
+output_vn = 'v6.2'
 deploy = 'dev'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
-weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
+# hrcm GWS not available.
+# weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
+# donedir = Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}')
+
+weightsdir = Path('/work/scratch-nopw2/mmuetz/weightsdir')
 # Location of donefiles. Delete to rerun a particular task.
-donedir = Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}')
+donedir = Path(f'/work/scratch-nopw2/mmuetz/donedir/{deploy}')
 
 # Defaults - can be overridden.
 slurm_config = dict(
@@ -29,7 +33,7 @@ slurm_config = dict(
     cpus_per_task=1,
     partition='standard',
     qos='standard',
-    time='24:00:00',
+    time='10:00:00',
     mem=100000,
     nconcurrent_tasks=40,
 )
@@ -130,8 +134,6 @@ time3d = pd.date_range('2020-01-20', '2021-03-01', freq='3h')
 #     key: (<short_name>, <long_name)
 #     val: MapItem or MultiMapItem
 name_map_2d = {
-    ('psl', 'air_pressure_at_mean_sea_level'): MapItem('air_pressure_at_sea_level'),
-    ('tas', 'air_temperature'): MapItem('air_temperature'),
     ('psl', 'air_pressure_at_mean_sea_level'): MapItem('air_pressure_at_sea_level'),
     ('tas', 'air_temperature'): MapItem('air_temperature'),
     # TODO: Why are these two missing? Can I replace them?
