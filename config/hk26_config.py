@@ -14,7 +14,7 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
     invert_cube_sign, check_cube_time_length
 
 # Global config.
-output_vn = 'v6.2'
+output_vn = 'v6.4'
 deploy = 'dev'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
@@ -67,9 +67,8 @@ chunks2d = {
     0: (4 ** 8, 12 * 4 ** 0),
 }
 
-# Much better for regional arrays if these have the same spatial chunks as 2d
 chunks3d = {
-    z: (t, 1, s)
+    z: (t, 5, s)
     for z, (t, s) in chunks2d.items()
 }
 

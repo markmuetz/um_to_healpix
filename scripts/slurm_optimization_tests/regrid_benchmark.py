@@ -91,15 +91,14 @@ class Benchmarker:
 
             regridder = LatLon2HealpixRegridder(method=method, nproc=nproc, **self.kwargs)
             da_hp = regridder.regrid(da, lonname, latname)
+
+            end = timer()
+
             if self.sim not in self.das:
                 self.das[self.sim] = da_hp
             else:
                 if not np.isclose(self.das[self.sim].values, da_hp.values).all():
                     breakpoint()
-
-
-
-            end = timer()
 
             self.output['runidx'].append(self.runidx)
             self.output['repidx'].append(i)

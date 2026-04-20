@@ -23,6 +23,7 @@ from pathlib import Path
 
 import dask
 import dask.array
+import zarr
 from dask.distributed import LocalCluster
 import iris
 import iris.exceptions
@@ -421,7 +422,10 @@ class UMProcessTasks:
             s3=get_jasmin_s3(), check=False)
         logger.debug(store_url)
         logger.debug(ds_tpl)
-        ds_tpl.to_zarr(zarr_store, mode='w', compute=False, zarr_format=2, consolidated=True)
+        # Writing consolidated=True at this stage slows down this write a lot.
+        ds_tpl.to_zarr(zarr_store, mode='w', compute=False, zarr_format=2)
+        # Writing it after the fact is quick.
+        zarr.consolidate_metadata(zarr_store)
 
     def regrid(self, task):
         """Regrid all variables from lat/lon to healpix.
