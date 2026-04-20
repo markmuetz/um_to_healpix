@@ -111,7 +111,7 @@ def gen_weights(da, weights_path, zoom=10, lonname='longitude', latname='latitud
         # Apply a 360 degree offset. This ensures that all hp_lon are within da[lonname].
         hp_lon[hp_lon == 0] = 360
 
-    da_flat = da.stack(cell=(lonname, latname))
+    da_flat = da.stack(healpix_index=(lonname, latname))
 
     logger.info('computing weights')
     lon = da_flat[lonname].values
@@ -173,11 +173,11 @@ class LatLon2HealpixRegridder:
             self._regrid_easygems_delaunay_parallel(da, dim_ranges, regridded_data, lonname, latname)
         elif self.method == 'earth2grid':
             self._regrid_earth2grid(da, dim_ranges, regridded_data, lonname, latname)
-        coords = {**coords, 'cell': cells}
+        coords = {**coords, 'healpix_index': cells}
         daout = xr.DataArray(
             regridded_data,
             name=da.name,
-            dims=reduced_dims + ['cell'],
+            dims=reduced_dims + ['healpix_index'],
             coords=coords,
             attrs=da.attrs,
         )
@@ -225,12 +225,12 @@ class LatLon2HealpixRegridder:
             da_flat,
             kwargs=self.weights,
             input_core_dims=[['latloncell']],  # The dimension to operate over
-            output_core_dims=[['cell']],  # The new dimension created by the function
+            output_core_dims=[['healpix_index']],  # The new dimension created by the function
             vectorize=True,  # Mimics your loop over non-core dimensions
             dask='parallelized',  # Optional: enables parallel execution if using Dask
             output_dtypes=[da_flat.dtype],
             dask_gufunc_kwargs={
-                'output_sizes': {'cell': self.weights['tgt_idx'].size}
+                'output_sizes': {'healpix_index': self.weights['tgt_idx'].size}
             }
         )
 

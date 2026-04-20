@@ -14,7 +14,7 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
     invert_cube_sign, check_cube_time_length
 
 # Global config.
-output_vn = 'v6.4'
+output_vn = 'v6.5'
 deploy = 'dev'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
@@ -138,7 +138,7 @@ name_map_2d = {
     # TODO: Why are these two missing? Can I replace them?
     # ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('atmosphere_cloud_liquid_water_content'),
     # ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('atmosphere_cloud_ice_content'),
-    ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461'),
+    ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461', units='kg m-2'),
     ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap'),
     ('uas', 'eastward_wind'): MapItem('x_wind'),
     ('vas', 'northward_wind'): MapItem('y_wind'),
@@ -163,26 +163,26 @@ name_map_2d = {
     ('hfssd', 'surface_downward_sensible_heat_flux'): MapItem('surface_upward_sensible_heat_flux',
                                                               extra_processing=invert_cube_sign),
     ('rlds', 'surface_downwelling_longwave_flux_in_air'): MapItem('surface_downwelling_longwave_flux_in_air'),
-    ('rldscs', 'surface_downwelling_longwave_flux_in_air_clear_sky'): MapItem(
+    ('rldscs', 'surface_downwelling_longwave_flux_in_air_assuming_clear_sky'): MapItem(
         'surface_downwelling_longwave_flux_in_air_assuming_clear_sky'),
     ('rsds', 'surface_downwelling_shortwave_flux_in_air'): MapItem('surface_downwelling_shortwave_flux_in_air'),
-    ('rsdscs', 'surface_downwelling_shortwave_flux_in_air_clear_sky'): MapItem(
+    ('rsdscs', 'surface_downwelling_shortwave_flux_in_air_assuming_clear_sky'): MapItem(
         'surface_downwelling_shortwave_flux_in_air_assuming_clear_sky'),
     ('ts', 'surface_temperature'): MapItem('surface_temperature'),
     ('rsdt', 'toa_incoming_shortwave_flux'): MapItem('toa_incoming_shortwave_flux'),
     ('rlut', 'toa_outgoing_longwave_flux'): MapItem('toa_outgoing_longwave_flux'),
-    ('rlutcs', 'toa_outgoing_longwave_flux_clear_sky'): MapItem('toa_outgoing_longwave_flux_assuming_clear_sky'),
+    ('rlutcs', 'toa_outgoing_longwave_flux_assuming_clear_sky'): MapItem('toa_outgoing_longwave_flux_assuming_clear_sky'),
     ('rsut', 'toa_outgoing_shortwave_flux'): MapItem(iris.Constraint(
         name='toa_outgoing_shortwave_flux') & iris.AttributeConstraint(
         STASH='m01s01i208')),
-    ('rsutcs', 'toa_outgoing_shortwave_flux_clear_sky'): MapItem('toa_outgoing_shortwave_flux_assuming_clear_sky'),
-    ('rsus', 'surface_upwelling_shortwave_flux_in_air'): MapItem('m01s01i202', extra_processing=invert_cube_sign),
+    ('rsutcs', 'toa_outgoing_shortwave_flux_assuming_clear_sky'): MapItem('toa_outgoing_shortwave_flux_assuming_clear_sky'),
+    ('rsus', 'surface_upwelling_shortwave_flux_in_air'): MapItem('m01s01i202', extra_processing=invert_cube_sign, units='W m-2'),
     ('rlus', 'surface_upwelling_longwave_flux_in_air'): MapItem('surface_net_downward_longwave_flux', extra_processing=invert_cube_sign),
 }
 
 # Add this in. Note, it's a 3D field with a vertical coord of depth, but it's at PT1H, so put in with the 2d vars.
 name_map_2d_depth = {
-    ('mrso', 'soil_liquid_water_content'): MapItem('moisture_content_of_soil_layer'),
+    ('mrsol', 'mass_content_of_water_in_soil_layer'): MapItem('moisture_content_of_soil_layer'),
 }
 
 name_map_3d = {

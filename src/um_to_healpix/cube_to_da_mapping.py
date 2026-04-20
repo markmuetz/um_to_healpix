@@ -57,11 +57,12 @@ class DataArrayExtractor:
 
 class MultiMapItem:
     """Contains several MapItems and the rules for combining these (in ops)."""
-    def __init__(self, items, ops, extra_processing=None, extra_attrs=None):
+    def __init__(self, items, ops, extra_processing=None, extra_attrs=None, units=None):
         self.items = items
         self.ops = ops
         self.extra_processing = extra_processing
         self.extra_attrs = extra_attrs if extra_attrs is not None else {}
+        self.units = units
 
     def __repr__(self):
         return 'MutliMapItem(' + str(self.items) + ', ' + str(self.ops) + ')'
@@ -70,10 +71,11 @@ class MultiMapItem:
 
 class MapItem:
     """Contains iris constraints to extract a given cube, along with extra_processing."""
-    def __init__(self, iris_constraint, extra_processing=None, extra_attrs=None):
+    def __init__(self, iris_constraint, extra_processing=None, extra_attrs=None, units=None):
         self.iris_constraint = iris_constraint
         self.extra_processing = extra_processing
         self.extra_attrs = extra_attrs if extra_attrs is not None else {}
+        self.units = units
 
     def __repr__(self):
         return f'MapItem({self.iris_constraint})'
