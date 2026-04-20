@@ -34,9 +34,9 @@ SLURM_SCRIPT_ARRAY = """#!/bin/bash
 #SBATCH -o slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.out
 #SBATCH -e slurm/output/{job_name}_{config_key}_{date_string}_%A_%a.err
 #SBATCH --comment={comment}
-#SBATCH --exclude=host1117,host1210,host1211,host1212,host1226,host1227,host1228,host1247,host1248,host1249,host1250
 {dependency}
 
+## #SBATCH --exclude=host1117,host1210,host1211,host1212,host1226,host1227,host1228,host1247,host1248,host1249,host1250
 # host1210-2, host1226-8 are silently failing :(.
 
 # These nodes repeatedly fail to be able to read the kscale GWS.
@@ -48,6 +48,8 @@ if ! ls /gws/nopw/j04/kscale > /dev/null 2>&1; then
     echo "ERROR: kscale GWS not accessible on $(hostname)! Exiting."
     exit 99
 fi
+
+export OMP_NUM_THREADS=1
 
 ARRAY_INDEX=${{SLURM_ARRAY_TASK_ID}}
 
@@ -260,6 +262,8 @@ def process(ctx, endtime, config_key):
         logger.info(f'Running {len(tasks)} tasks')
         slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks, 'regrid',
                                                         nconcurrent_tasks=nconcurrent_tasks,
+                                                        qos='high',
+                                                        cpus_per_task=6,
                                                         depends_on=create_jobid)
         logger.debug(slurm_script_path)
         if not ctx.obj['dry_run']:
