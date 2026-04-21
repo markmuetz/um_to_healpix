@@ -191,19 +191,20 @@ class UMProcessTasks:
                 'regional_bounds': None,
                 'latitiude_convention': '[-90, 90]',
                 'longitude_convention': '[0, 360]',
-                'regional': regional,
+                'regional': str(regional),
             },
             **self.config['metadata'],
             **self.shared_metadata,
+            'Conventions': 'CF-1.13',
         }
 
         if not regional:
-            metadata['regional_bounds'] = {
+            metadata['regional_bounds'] = str({
                 'lower_left_lat': -90,
                 'lower_left_lon': 0,
                 'upper_right_lat': 90,
                 'upper_right_lon': 360,
-            }
+            })
         return metadata
 
     @staticmethod
@@ -244,12 +245,11 @@ class UMProcessTasks:
 
         generate orog_land_sea (static data) at each zoom level and return as dict."""
         config = self.config
-        basedir = config['basedir']
         max_zoom = config['max_zoom']
         add_cyclic = config.get('add_cyclic', True)
         regional = config.get('regional', False)
 
-        cubes = iris.load(basedir / f'field.pp/apa.pp/{config["name"]}.apa_20200120T00.pp')
+        cubes = iris.load(config['orog_land_sea'])
         land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask'))
         orog = xr.DataArray.from_iris(cubes.extract_cube('surface_altitude'))
 
@@ -257,12 +257,15 @@ class UMProcessTasks:
                         weights_filename(land, config['max_zoom'],
                                          'longitude', 'latitude', add_cyclic, regional))
         assert weights_path.exists(), f'{weights_path} does not exist'
-        regridder = LatLon2HealpixRegridder(weights_path=weights_path, zoom_level=max_zoom, add_cyclic=add_cyclic,
+        weights = xr.load_dataset(weights_path)
+        regridder = LatLon2HealpixRegridder(weights=weights, zoom_level=max_zoom, add_cyclic=add_cyclic,
                                             regional=regional)
         hpland = regridder.regrid(land, 'longitude', 'latitude')
         hporog = regridder.regrid(orog, 'longitude', 'latitude')
         hpland.attrs['long_name'] = 'land_area_fraction'
         hporog.attrs['long_name'] = 'surface_altitude'
+        hpland.attrs['grid_mapping'] = 'crs'
+        hporog.attrs['grid_mapping'] = 'crs'
 
         orog_land_sea = {}
 
@@ -371,8 +374,7 @@ class UMProcessTasks:
             for group_name, group in self.config['groups'].items()
         }
 
-        # TODO: Add orog back in!
-        add_orog = not regional and False
+        add_orog = not regional
 
         if add_orog:
             # TODO: handle regional.
@@ -415,7 +417,6 @@ class UMProcessTasks:
         """Write a zarr store for the dataset template"""
         ds_tpl = ds_tpl.assign_coords(crs=get_crs(zoom))
         ds_tpl.attrs.update(metadata)
-        ds_tpl.attrs['Conventions'] = 'CF-1.14'
 
         logger.info(f'Saving {task["config_key"]} zoom={zoom}')
         store_url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)

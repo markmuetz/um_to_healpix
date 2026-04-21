@@ -181,10 +181,6 @@ class LatLon2HealpixRegridder:
             coords=coords,
             attrs=da.attrs,
         )
-        daout.attrs['grid_mapping'] = 'healpix_nested'
-        daout.attrs['healpix_zoom'] = self.zoom_level
-        daout.attrs['coarsened'] = 'False'
-        daout.attrs['regrid_method'] = self.method
         return daout
 
     def _regrid_easygems_delaunay(self, da, dim_ranges, regridded_data, lonname, latname):

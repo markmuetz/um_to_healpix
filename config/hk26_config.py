@@ -14,7 +14,7 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
     invert_cube_sign, check_cube_time_length
 
 # Global config.
-output_vn = 'v6.5'
+output_vn = 'v6.6_add_orog_land_sea'
 deploy = 'dev'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
@@ -314,6 +314,14 @@ for key in global_sim_keys:
     else:
         group3d_ml_global_map[key] = group3d_ml
 
+# NOTE, THESE USE THE ORIGINAL DYMOND 3 DATA.
+# There is no included orog for the DYAMOND3_rerun.
+orig_base_dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
+orog_land_sea = {
+    'glm.n2560_RAL3p3.tuned': orig_base_dir / '5km-RAL3/glm/field.pp/apa.pp/glm.n2560_RAL3p3.apa_20200120T00.pp',
+    'glm.n1280_CoMA9': orig_base_dir / '10km-CoMA9/glm/field.pp/apa.pp/glm.n1280_CoMA9.apa_20200120T00.pp',
+}
+
 # Construct global configs
 # ========================
 global_configs = {
@@ -323,6 +331,7 @@ global_configs = {
         'add_cyclic': True,
         'basedir': dy3dir / f'{simdir}/glm',
         'weightsdir': weightsdir,
+        'orog_land_sea': orog_land_sea[key],
         'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
         'first_date': pd.Timestamp(2020, 1, 20, 0),
