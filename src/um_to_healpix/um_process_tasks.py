@@ -250,7 +250,7 @@ class UMProcessTasks:
         regional = config.get('regional', False)
 
         cubes = iris.load(config['orog_land_sea'])
-        land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask'))
+        land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask')) * 100  # turn into %
         orog = xr.DataArray.from_iris(cubes.extract_cube('surface_altitude'))
 
         weights_path = (config['weightsdir'] /
@@ -262,10 +262,13 @@ class UMProcessTasks:
                                             regional=regional)
         hpland = regridder.regrid(land, 'longitude', 'latitude')
         hporog = regridder.regrid(orog, 'longitude', 'latitude')
+        hpland.attrs['standard_name'] = 'land_area_fraction'
+        hporog.attrs['standard_name'] = 'surface_altitude'
         hpland.attrs['long_name'] = 'land_area_fraction'
         hporog.attrs['long_name'] = 'surface_altitude'
         hpland.attrs['grid_mapping'] = 'crs'
         hporog.attrs['grid_mapping'] = 'crs'
+        hpland.attrs['units'] = '%'
 
         orog_land_sea = {}
 
@@ -426,6 +429,8 @@ class UMProcessTasks:
             s3=get_jasmin_s3(), check=False)
         logger.debug(store_url)
         logger.debug(ds_tpl)
+        # For quick tests.
+        # ds_tpl.isel(time=0).to_netcdf('/work/scratch-nopw2/mmuetz/tmp/' + '_'.join(store_url.split('/')[2:]) + '.nc')
         # Writing consolidated=True at this stage slows down this write a lot.
         ds_tpl.to_zarr(zarr_store, mode='w', compute=False, zarr_format=2)
         # Writing it after the fact is quick.
