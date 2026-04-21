@@ -11,10 +11,10 @@ import pandas as pd
 
 from um_to_healpix.cube_to_da_mapping import MapItem, MultiMapItem
 from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cube_cell_method_is_empty, \
-    invert_cube_sign, check_cube_time_length
+    invert_cube_sign, check_cube_time_length, make_percentage
 
 # Global config.
-output_vn = 'v6.4'
+output_vn = 'v6.7.cf_compliance'
 deploy = 'dev'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
@@ -138,8 +138,9 @@ name_map_2d = {
     # TODO: Why are these two missing? Can I replace them?
     # ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('atmosphere_cloud_liquid_water_content'),
     # ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('atmosphere_cloud_ice_content'),
-    ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461'),
-    ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap'),
+    ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461', units='kg m-2'),
+    # Turn into a percentage to match standards.
+    ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap', extra_processing=make_percentage, units='%'),
     ('uas', 'eastward_wind'): MapItem('x_wind'),
     ('vas', 'northward_wind'): MapItem('y_wind'),
     ('pr', 'precipitation_flux'): MultiMapItem(
@@ -151,6 +152,7 @@ name_map_2d = {
         extra_attrs={
             'notes': 'Combined rain and snow. Hourly mean - time index shifted from half past the hour to the following hour'},
     ),
+    # Non-standard variable - not in: https://clipc-services.ceda.ac.uk/dreq/index/var.html
     ('prs', 'solid_precipitation_flux'): MapItem(
         iris.Constraint(name='stratiform_snowfall_flux') & iris.Constraint(
             cube_func=cube_cell_method_is_not_empty),
@@ -158,42 +160,45 @@ name_map_2d = {
         ),
     ('huss', 'specific_humidity'): MapItem('specific_humidity'),
     ('ps', 'surface_air_pressure'): MapItem('surface_air_pressure'),
-    ('hflsd', 'surface_downward_latent_heat_flux'): MapItem('surface_upward_latent_heat_flux',
+    # originally hflsd, hfssd, but these are not the standard variable names:
+    # https://clipc-services.ceda.ac.uk/dreq/index/var.html
+    ('hflso', 'surface_downward_latent_heat_flux'): MapItem('surface_upward_latent_heat_flux',
                                                             extra_processing=invert_cube_sign),
-    ('hfssd', 'surface_downward_sensible_heat_flux'): MapItem('surface_upward_sensible_heat_flux',
+    ('hfsso', 'surface_downward_sensible_heat_flux'): MapItem('surface_upward_sensible_heat_flux',
                                                               extra_processing=invert_cube_sign),
     ('rlds', 'surface_downwelling_longwave_flux_in_air'): MapItem('surface_downwelling_longwave_flux_in_air'),
-    ('rldscs', 'surface_downwelling_longwave_flux_in_air_clear_sky'): MapItem(
+    ('rldscs', 'surface_downwelling_longwave_flux_in_air_assuming_clear_sky'): MapItem(
         'surface_downwelling_longwave_flux_in_air_assuming_clear_sky'),
     ('rsds', 'surface_downwelling_shortwave_flux_in_air'): MapItem('surface_downwelling_shortwave_flux_in_air'),
-    ('rsdscs', 'surface_downwelling_shortwave_flux_in_air_clear_sky'): MapItem(
+    ('rsdscs', 'surface_downwelling_shortwave_flux_in_air_assuming_clear_sky'): MapItem(
         'surface_downwelling_shortwave_flux_in_air_assuming_clear_sky'),
     ('ts', 'surface_temperature'): MapItem('surface_temperature'),
     ('rsdt', 'toa_incoming_shortwave_flux'): MapItem('toa_incoming_shortwave_flux'),
     ('rlut', 'toa_outgoing_longwave_flux'): MapItem('toa_outgoing_longwave_flux'),
-    ('rlutcs', 'toa_outgoing_longwave_flux_clear_sky'): MapItem('toa_outgoing_longwave_flux_assuming_clear_sky'),
+    ('rlutcs', 'toa_outgoing_longwave_flux_assuming_clear_sky'): MapItem('toa_outgoing_longwave_flux_assuming_clear_sky'),
     ('rsut', 'toa_outgoing_shortwave_flux'): MapItem(iris.Constraint(
         name='toa_outgoing_shortwave_flux') & iris.AttributeConstraint(
         STASH='m01s01i208')),
-    ('rsutcs', 'toa_outgoing_shortwave_flux_clear_sky'): MapItem('toa_outgoing_shortwave_flux_assuming_clear_sky'),
-    ('rsus', 'surface_upwelling_shortwave_flux_in_air'): MapItem('m01s01i202', extra_processing=invert_cube_sign),
+    ('rsutcs', 'toa_outgoing_shortwave_flux_assuming_clear_sky'): MapItem('toa_outgoing_shortwave_flux_assuming_clear_sky'),
+    ('rsus', 'surface_upwelling_shortwave_flux_in_air'): MapItem('m01s01i202', extra_processing=invert_cube_sign, units='W m-2'),
     ('rlus', 'surface_upwelling_longwave_flux_in_air'): MapItem('surface_net_downward_longwave_flux', extra_processing=invert_cube_sign),
 }
 
 # Add this in. Note, it's a 3D field with a vertical coord of depth, but it's at PT1H, so put in with the 2d vars.
 name_map_2d_depth = {
-    ('mrso', 'soil_liquid_water_content'): MapItem('moisture_content_of_soil_layer'),
+    # Originally mrso but this is the standard for soil moisture in layers.
+    ('mrsol', 'mass_content_of_water_in_soil_layer'): MapItem('moisture_content_of_soil_layer'),
 }
 
 name_map_3d = {
     ('ua', 'eastward_wind'): MapItem('x_wind'),
-    ('zg', 'geopotential height'): MapItem('geopotential_height'),
-    ('va', 'northtward_wind'): MapItem('y_wind'),
+    ('zg', 'geopotential_height'): MapItem('geopotential_height'),
+    ('va', 'northward_wind'): MapItem('y_wind'),
     ('hur', 'relative_humidity'): MapItem(iris.Constraint(
         name='relative_humidity') & iris.AttributeConstraint(
         STASH='m01s30i206')),
     ('hus', 'specific_humidity'): MapItem('specific_humidity'),
-    ('ta', 'temperature'): MapItem('air_temperature'),
+    ('ta', 'air_temperature'): MapItem('air_temperature'),
     ('wa', 'upward_air_velocity'): MapItem('upward_air_velocity'),
 }
 
@@ -202,6 +207,7 @@ name_map_3d_ml = {
                                                           extra_processing='interpolate_model_levels_to_pressure'),
     ('clw', 'mass_fraction_of_cloud_liquid_water_in_air'): MapItem('mass_fraction_of_cloud_liquid_water_in_air',
                                                                    extra_processing='interpolate_model_levels_to_pressure'),
+    # Non-standard variables - not in: https://clipc-services.ceda.ac.uk/dreq/index/var.html
     ('qg', 'mass_fraction_of_graupel_in_air'): MapItem('mass_fraction_of_graupel_in_air',
                                                        extra_processing='interpolate_model_levels_to_pressure'),
     ('qr', 'mass_fraction_of_rain_in_air'): MapItem('mass_fraction_of_rain_in_air',
@@ -314,6 +320,14 @@ for key in global_sim_keys:
     else:
         group3d_ml_global_map[key] = group3d_ml
 
+# NOTE, THESE USE THE ORIGINAL DYMOND 3 DATA.
+# There is no included orog for the DYAMOND3_rerun.
+orig_base_dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
+orog_land_sea = {
+    'glm.n2560_RAL3p3.tuned': orig_base_dir / '5km-RAL3/glm/field.pp/apa.pp/glm.n2560_RAL3p3.apa_20200120T00.pp',
+    'glm.n1280_CoMA9': orig_base_dir / '10km-CoMA9/glm/field.pp/apa.pp/glm.n1280_CoMA9.apa_20200120T00.pp',
+}
+
 # Construct global configs
 # ========================
 global_configs = {
@@ -323,6 +337,7 @@ global_configs = {
         'add_cyclic': True,
         'basedir': dy3dir / f'{simdir}/glm',
         'weightsdir': weightsdir,
+        'orog_land_sea': orog_land_sea[key],
         'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
         'first_date': pd.Timestamp(2020, 1, 20, 0),

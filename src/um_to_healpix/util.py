@@ -158,6 +158,11 @@ def invert_cube_sign(cube):
     return cube
 
 
+def make_percentage(cube):
+    cube.data = 100 * cube.data
+    return cube
+
+
 def check_cube_time_length(cube):
     # Shorten cube if it has length 13 (applies to first cube only I think).
     if cube.shape[0] == 13:

@@ -34,7 +34,7 @@ import xarray as xr
 from loguru import logger
 
 from .cube_to_da_mapping import DataArrayExtractor
-from .healpix_coarsen import coarsen_healpix_zarr_region, async_da_to_zarr_with_retries
+from .healpix_coarsen import coarsen_healpix_zarr_region
 from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited_healpix
 from .util import async_da_to_zarr_with_retries, load_config, exception_info
 
@@ -55,9 +55,14 @@ def get_jasmin_s3():
 
 def get_crs(zoom):
     return xr.DataArray(
+        np.array(0, dtype="int32"),
         name="crs",
         attrs={
+            # CF-conventions:
             "grid_mapping_name": "healpix",
+            "indexing_scheme": "nested",
+            "refinement_level": zoom,
+            # Old/used by easygems:
             "healpix_nside": 2 ** zoom,
             "healpix_order": "nest",
         },
@@ -67,11 +72,8 @@ def get_crs(zoom):
 def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, add_cyclic=True,
                          regional=False, regional_chunks=None):
     """Create a regridded DataArray at a given zoom level from the original lat/lon DataArray."""
-    um_name = da.name
-
     lonname = [c for c in da.coords if c.startswith('longitude')][0]
     latname = [c for c in da.coords if c.startswith('latitude')][0]
-    # weights_path = weightsdir / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
     logger.trace(f'  - using weights: {weights}')
 
     # regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay', zoom_level=zoom,
@@ -86,10 +88,6 @@ def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, ad
 
     da_hp = regridder.regrid(da, lonname, latname)
     da_hp = da_hp.rename(short_name)
-    da_hp.attrs['UM_name'] = um_name
-    da_hp.attrs['long_name'] = long_name
-    da_hp.attrs['grid_mapping'] = 'healpix_nested'
-    da_hp.attrs['healpix_zoom'] = zoom
 
     return da_hp
 
@@ -121,12 +119,12 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
         f'writing {name} to zarr store {url} (idx={idx}, time={source_times_to_match[0]})')
     # Use time index to select a region to write data to.
     if group_name == '2d':
-        region = {'time': slice(idx, idx + len(da['time'])), 'cell': slice(None)}
+        region = {'time': slice(idx, idx + len(da['time'])), 'healpix_index': slice(None)}
     elif group_name == '2d_depth':
         # e.g. mrso (only at the moment)
-        region = {'time': slice(idx, idx + len(da['time'])), 'depth': slice(None), 'cell': slice(None)}
+        region = {'time': slice(idx, idx + len(da['time'])), 'depth': slice(None), 'healpix_index': slice(None)}
     elif group_name.startswith('3d'):
-        region = {'time': slice(idx, idx + len(da['time'])), 'pressure': slice(None), 'cell': slice(None)}
+        region = {'time': slice(idx, idx + len(da['time'])), 'pressure': slice(None), 'healpix_index': slice(None)}
     else:
         raise ValueError(f'group name {group_name} not recognized')
 
@@ -171,7 +169,7 @@ def get_regional_bounds(da):
             'upper_right_lat': float(round(da.latitude.values[-1], 3)),
             'upper_right_lon': float(round(da.longitude.values[-1] % 360, 3)),
         }
-        return bounds
+        return str(bounds)
     else:
         return None
 
@@ -190,22 +188,23 @@ class UMProcessTasks:
         """Initialize metadata dict with default and config values"""
         metadata = {
             **{
-                'bounds': None,
+                'regional_bounds': None,
                 'latitiude_convention': '[-90, 90]',
                 'longitude_convention': '[0, 360]',
-                'regional': regional,
+                'regional': str(regional),
             },
             **self.config['metadata'],
             **self.shared_metadata,
+            'Conventions': 'CF-1.13',
         }
 
         if not regional:
-            metadata['bounds'] = {
+            metadata['regional_bounds'] = str({
                 'lower_left_lat': -90,
                 'lower_left_lon': 0,
                 'upper_right_lat': 90,
                 'upper_right_lon': 360,
-            }
+            })
         return metadata
 
     @staticmethod
@@ -228,7 +227,11 @@ class UMProcessTasks:
 
             # Just use first cube here.
             da = xr.DataArray.from_iris(cubes[0]).rename(short_name)
+            da.attrs['standard_name'] = long_name
             da.attrs['long_name'] = long_name
+            da.attrs['variable_id'] = short_name
+            da.attrs['UM_vars'] = str([c.name() for c in cubes])
+            da.attrs['units'] = map_item.units if map_item.units is not None else str(cubes[0].units)
             da.attrs.update(map_item.extra_attrs)
             list_da.append(da)
 
@@ -242,25 +245,30 @@ class UMProcessTasks:
 
         generate orog_land_sea (static data) at each zoom level and return as dict."""
         config = self.config
-        basedir = config['basedir']
         max_zoom = config['max_zoom']
         add_cyclic = config.get('add_cyclic', True)
         regional = config.get('regional', False)
 
-        cubes = iris.load(basedir / f'field.pp/apa.pp/{config["name"]}.apa_20200120T00.pp')
-        land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask'))
+        cubes = iris.load(config['orog_land_sea'])
+        land = xr.DataArray.from_iris(cubes.extract_cube('land_binary_mask')) * 100  # turn into %
         orog = xr.DataArray.from_iris(cubes.extract_cube('surface_altitude'))
 
         weights_path = (config['weightsdir'] /
                         weights_filename(land, config['max_zoom'],
                                          'longitude', 'latitude', add_cyclic, regional))
         assert weights_path.exists(), f'{weights_path} does not exist'
-        regridder = LatLon2HealpixRegridder(weights_path=weights_path, zoom_level=max_zoom, add_cyclic=add_cyclic,
+        weights = xr.load_dataset(weights_path)
+        regridder = LatLon2HealpixRegridder(weights=weights, zoom_level=max_zoom, add_cyclic=add_cyclic,
                                             regional=regional)
         hpland = regridder.regrid(land, 'longitude', 'latitude')
         hporog = regridder.regrid(orog, 'longitude', 'latitude')
+        hpland.attrs['standard_name'] = 'land_area_fraction'
+        hporog.attrs['standard_name'] = 'surface_altitude'
         hpland.attrs['long_name'] = 'land_area_fraction'
         hporog.attrs['long_name'] = 'surface_altitude'
+        hpland.attrs['grid_mapping'] = 'crs'
+        hporog.attrs['grid_mapping'] = 'crs'
+        hpland.attrs['units'] = '%'
 
         orog_land_sea = {}
 
@@ -268,10 +276,10 @@ class UMProcessTasks:
             if zoom != max_zoom:
                 # TODO: Get working for regional.
                 assert regional == False, 'will not work with regional data yet'
-                hpland = hpland.coarsen(cell=4).mean()
-                hporog = hporog.coarsen(cell=4).mean()
-                hpland['cell'] = np.arange(len(hpland.cell))
-                hporog['cell'] = np.arange(len(hporog.cell))
+                hpland = hpland.coarsen(healpix_index=4).mean()
+                hporog = hporog.coarsen(healpix_index=4).mean()
+                hpland['healpix_index'] = np.arange(len(hpland.healpix_index))
+                hporog['healpix_index'] = np.arange(len(hporog.healpix_index))
             ds_static = xr.Dataset()
             ds_static['orog'] = hporog.copy().assign_coords(crs=get_crs(zoom))
             ds_static['sftlf'] = hpland.copy().assign_coords(crs=get_crs(zoom))
@@ -313,24 +321,25 @@ class UMProcessTasks:
             cells = np.arange(npix)
 
         if da.dims == ('time', 'latitude', 'longitude'):
-            dims = ['time', 'cell']
-            coords = {zarr_time_name: zarr_time, 'cell': cells}
+            dims = ['time', 'healpix_index']
+            coords = {zarr_time_name: ([zarr_time_name], zarr_time, {'standard_name': zarr_time_name}),
+                      'healpix_index': (['healpix_index'], cells, {'standard_name': 'healpix_index'})}
             shape = (len(zarr_time), len(cells))
         elif (da.dims == ('time', 'pressure', 'latitude', 'longitude') or
               da.dims == ('time', 'model_level_number', 'latitude', 'longitude')):
-            dims = ['time', 'pressure', 'cell']
+            dims = ['time', 'pressure', 'healpix_index']
             # Note this handles model_level_number as well so can't just pull these out of da.
             pressure_levels = [1, 5, 10, 20, 30, 50, 70, 100, 150, 200, 250, 300, 400, 500, 600, 700, 750,
                                800, 850, 875, 900, 925, 950, 975, 1000]
-            coords = {zarr_time_name: zarr_time,
-                      'pressure': (['pressure'], pressure_levels, {'units': 'hPa'}),
-                      'cell': cells}
+            coords = {zarr_time_name: ([zarr_time_name], zarr_time, {'standard_name': zarr_time_name}),
+                      'pressure': (['pressure'], pressure_levels, {'units': 'hPa', 'standard_name': 'pressure'}),
+                      'healpix_index': (['healpix_index'], cells, {'standard_name': 'healpix_index'})}
             shape = (len(zarr_time), len(pressure_levels), len(cells))
         elif da.dims == ('time', 'depth', 'latitude', 'longitude'):
-            dims = ['time', 'depth', 'cell']
-            coords = {zarr_time_name: zarr_time,
-                      'depth': (['depth'], da.depth.values, {'units': 'm'}),
-                      'cell': cells}
+            dims = ['time', 'depth', 'healpix_index']
+            coords = {zarr_time_name: ([zarr_time_name], zarr_time, {'standard_name': zarr_time_name}),
+                      'depth': (['depth'], da.depth.values, {'units': 'm', 'positive': 'down', 'standard_name': 'depth', 'axis': 'Z'}),
+                      'healpix_index': (['healpix_index'], cells, {'standard_name': 'healpix_index'})}
             shape = (len(zarr_time), len(da.depth), len(cells))
         else:
             logger.error(da.dims)
@@ -341,9 +350,8 @@ class UMProcessTasks:
         dummies = dask.array.zeros(shape, dtype=np.float32, chunks=chunks)
         da_tpl = xr.DataArray(dummies, dims=dims, coords=coords, name=da.name, attrs=da.attrs)
         da_tpl = da_tpl.rename(**{timename: zarr_time_name})
-        da_tpl.attrs['UM_name'] = da.name
-        da_tpl.attrs['grid_mapping'] = 'healpix_nested'
-        da_tpl.attrs['healpix_zoom'] = zoom
+        # da_tpl.attrs['UM_name'] = da.name
+        da_tpl.attrs['grid_mapping'] = 'crs'
         return da_tpl
 
     def create_empty_zarr_stores(self, task):
@@ -369,8 +377,7 @@ class UMProcessTasks:
             for group_name, group in self.config['groups'].items()
         }
 
-        # TODO: Add orog back in!
-        add_orog = not regional and False
+        add_orog = not regional
 
         if add_orog:
             # TODO: handle regional.
@@ -393,9 +400,9 @@ class UMProcessTasks:
                         group, da, chunks, zoom, npix, zarr_time, zarr_time_name
                     )
                     if regional:
-                        if metadata['bounds'] is None:
-                            metadata['bounds'] = get_regional_bounds(da)
-                            logger.debug('bounds={}'.format(metadata['bounds']))
+                        if metadata['regional_bounds'] is None:
+                            metadata['regional_bounds'] = get_regional_bounds(da)
+                            logger.debug('regional_bounds={}'.format(metadata['bounds']))
                     ds_tpls[zarr_store_name][da_tpl.name] = da_tpl
                     if add_orog:
                         ds_tpls[zarr_store_name]['orog'] = orog_land_sea[zoom].orog
@@ -422,6 +429,8 @@ class UMProcessTasks:
             s3=get_jasmin_s3(), check=False)
         logger.debug(store_url)
         logger.debug(ds_tpl)
+        # For quick tests.
+        # ds_tpl.isel(time=0).to_netcdf('/work/scratch-nopw2/mmuetz/tmp/' + '_'.join(store_url.split('/')[2:]) + '.nc')
         # Writing consolidated=True at this stage slows down this write a lot.
         ds_tpl.to_zarr(zarr_store, mode='w', compute=False, zarr_format=2)
         # Writing it after the fact is quick.
@@ -472,9 +481,6 @@ class UMProcessTasks:
             # extractor will handle these.
             for i, key in enumerate(name_map):
                 short_name, long_name = key
-                if short_name == 'mrso':
-                    # TODO!!!
-                    continue
                 msg = f'{(i + 1)}/{len(name_map)}: regridding {short_name}'
                 logger.info('=' * len(msg))
                 logger.info(msg)
@@ -519,7 +525,7 @@ class UMProcessTasks:
         tgt_store = s3fs.S3Map(root=urls[tgt_zoom], s3=jasmin_s3, check=False)
 
         chunks = self.config['groups'][dim]['chunks']
-        zarr_chunks = {'time': chunks[tgt_zoom][0], 'cell': -1}
+        zarr_chunks = {'time': chunks[tgt_zoom][0], 'healpix_index': -1}
         src_ds = xr.open_zarr(src_store, chunks=zarr_chunks)
         regional = self.config['regional']
 
