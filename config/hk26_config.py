@@ -135,9 +135,9 @@ time3d = pd.date_range('2020-01-20', '2021-03-01', freq='3h')
 name_map_2d = {
     ('psl', 'air_pressure_at_mean_sea_level'): MapItem('air_pressure_at_sea_level'),
     ('tas', 'air_temperature'): MapItem('air_temperature'),
-    # TODO: Why are these two missing? Can I replace them?
-    # ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('atmosphere_cloud_liquid_water_content'),
-    # ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('atmosphere_cloud_ice_content'),
+    # Replaced following https://github.com/markmuetz/um_to_healpix/issues/5
+    ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('m01s02i391'),
+    ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('m01s02i392'),
     ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461', units='kg m-2'),
     # Turn into a percentage to match standards.
     ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap', extra_processing=make_percentage, units='%'),
@@ -264,7 +264,7 @@ group3d_ml = {
 global_sim_keys = {
     'glm.n2560_RAL3p3.tuned': '5km-RAL3p3-tuned',
     'glm.n1280_CoMA9': '10km-CoMA9',
-    # 'glm.n1280_GAL9_nest': '10km-GAL9-nest',
+    'glm.n1280_GAL9_v2': '10km-GAL9',
 }
 
 # Handle differences between GAL9/CoMA9 precip
@@ -298,13 +298,11 @@ group2d_CoMA9['name_map'][('pr', 'precipitation_flux')] = MapItem(
     )
 
 group3d_ml_CoMA9 = copy.deepcopy(group3d_ml)
-# TODO: Not present.
-del group3d_ml_CoMA9['name_map'][('qs', 'mass_fraction_of_snow_water_in_air')]
 
 # Build a mapping to go from key to the correct 2d group
 group2d_global_map = {}
 for key in global_sim_keys:
-    if key.endswith('GAL9_nest'):
+    if key.endswith('GAL9_v2'):
         group2d_global_map[key] = group2d_GAL9
     elif key.endswith('CoMA9'):
         group2d_global_map[key] = group2d_CoMA9
@@ -326,6 +324,7 @@ orig_base_dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
 orog_land_sea = {
     'glm.n2560_RAL3p3.tuned': orig_base_dir / '5km-RAL3/glm/field.pp/apa.pp/glm.n2560_RAL3p3.apa_20200120T00.pp',
     'glm.n1280_CoMA9': orig_base_dir / '10km-CoMA9/glm/field.pp/apa.pp/glm.n1280_CoMA9.apa_20200120T00.pp',
+    'glm.n1280_GAL9_v2': orig_base_dir / '10km-CoMA9/glm/field.pp/apa.pp/glm.n1280_CoMA9.apa_20200120T00.pp',
 }
 
 # Construct global configs
