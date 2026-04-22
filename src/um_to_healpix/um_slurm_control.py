@@ -3,15 +3,14 @@
 * Works by scanning input directories, then builds a list of jobs based on whether each job has already been done yet.
 * Uses click to build a nice CLI.
 """
-import math
-import sys
 import json
+import math
 import pprint
 import subprocess as sp
+import sys
 from collections import defaultdict
 from itertools import batched
 from pathlib import Path
-
 
 import click
 import pandas as pd
@@ -41,7 +40,8 @@ SLURM_SCRIPT_ARRAY = """#!/bin/bash
 
 # These nodes repeatedly fail to be able to read the kscale GWS.
 # Apparently these have been fixed:
-# I used to have this #SBATCH --exclude=host1012,host1077,host1087,host1106,host1186,host1080,host1197,host1135,host1238,host1222,host1234
+# I used to have this #SBATCH --exclude=host1012,host1077,host1087,host1106,host1186,host1080,host1197,host1135,
+host1238,host1222,host1234
 
 # Quick check to see if it can access the kscale GWS.
 if ! ls /gws/nopw/j04/kscale > /dev/null 2>&1; then
@@ -55,6 +55,7 @@ ARRAY_INDEX=${{SLURM_ARRAY_TASK_ID}}
 
 um-process-tasks slurm {tasks_path} ${{ARRAY_INDEX}}
 """
+
 
 def sbatch(slurm_script_path):
     """Submit script using sbatch."""
@@ -96,15 +97,8 @@ def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depen
     slurm_script_path = Path(f'slurm/scripts/script_{job_name}_{config_key}_{date_string}.sh')
     njobs = len(tasks) - 1
     slurm_kwargs = {**slurm_config, **kwargs}
-    script_kwargs = dict(
-        job_name=job_name,
-        config_key=config_key,
-        njobs=njobs,
-        tasks_path=tasks_path,
-        dependency=dependency,
-        date_string=date_string,
-        comment=comment,
-    )
+    script_kwargs = dict(job_name=job_name, config_key=config_key, njobs=njobs, tasks_path=tasks_path,
+        dependency=dependency, date_string=date_string, comment=comment, )
 
     logger.debug({**slurm_kwargs, **script_kwargs})
     slurm_script_path.write_text(SLURM_SCRIPT_ARRAY.format(**{**slurm_kwargs, **script_kwargs}))
@@ -124,10 +118,7 @@ def find_dyamond3_pp_dates_to_paths(basedir):
             continue
         dates_to_paths[_parse_date_from_pp_path(path)].append(path)
     # Only keep completed downloads.
-    dates_to_paths = {
-        k: v for k, v in dates_to_paths.items()
-        if len(v) == 4
-    }
+    dates_to_paths = {k: v for k, v in dates_to_paths.items() if len(v) == 4}
     logger.debug(f'found {len(dates_to_paths)} complete dates')
     return dates_to_paths
 
@@ -219,15 +210,11 @@ def process(ctx, endtime, config_key):
             if not create_donepath.exists():
                 # Create a task to create empty zarr stores on first date and if not already completed.
                 logger.info('Creating zarr store')
-                create_task = {
-                    'task_type': 'create_empty_zarr_stores',
-                    'config_path': ctx.obj['config_path'],
-                    'config_key': config_key,
-                    'date': str(date),
-                    'inpaths': [str(p) for p in dates_to_paths[date]],
-                    'donepath': str(create_donepath),
-                }
-                slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, [create_task], f'createzarr',
+                create_task = {'task_type': 'create_empty_zarr_stores', 'config_path': ctx.obj['config_path'],
+                    'config_key': config_key, 'date': str(date), 'inpaths': [str(p) for p in dates_to_paths[date]],
+                    'donepath': str(create_donepath), }
+                slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key,
+                                                                [create_task], f'createzarr',
                                                                 nconcurrent_tasks=nconcurrent_tasks)
                 logger.debug(slurm_script_path)
                 create_donepath.parent.mkdir(parents=True, exist_ok=True)
@@ -245,26 +232,16 @@ def process(ctx, endtime, config_key):
         else:
             # Create regrid task for a given date.
             logger.info(f'{date}: processing')
-            tasks.append(
-                {
-                    'task_type': 'regrid',
-                    'config_path': ctx.obj['config_path'],
-                    'config_key': config_key,
-                    'date': str(date),
-                    'inpaths': [str(p) for p in dates_to_paths[date]],
-                    'donepath': str(donepath),
-                }
-            )
+            tasks.append({'task_type': 'regrid', 'config_path': ctx.obj['config_path'], 'config_key': config_key,
+                'date': str(date), 'inpaths': [str(p) for p in dates_to_paths[date]], 'donepath': str(donepath), })
 
     regrid_jobid = None
     if len(tasks):
         # Run tasks.
         logger.info(f'Running {len(tasks)} tasks')
         slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks, 'regrid',
-                                                        nconcurrent_tasks=nconcurrent_tasks,
-                                                        qos='high',
-                                                        cpus_per_task=6,
-                                                        depends_on=create_jobid)
+                                                        nconcurrent_tasks=nconcurrent_tasks, qos='high',
+                                                        cpus_per_task=6, depends_on=create_jobid)
         logger.debug(slurm_script_path)
         if not ctx.obj['dry_run']:
             regrid_jobid = sbatch(slurm_script_path)
@@ -278,7 +255,7 @@ def process(ctx, endtime, config_key):
 
 
 @cli.command()
-@click.option( '--dims', type=click.Choice(['2d', '3d', 'both']), default='both')
+@click.option('--dims', type=click.Choice(['2d', '3d', 'both']), default='both')
 # Make this too low and e.g. coarsen_3d_8 seems to complain on writing to obj store.
 @click.option('--nbatch', '-B', default=10, help='number of subtasks for each job to run')
 @click.option('--endtime', '-E', default='2022-01-01 00:00')
@@ -317,29 +294,12 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
             timechunk = chunks[zoom][0]
             logger.debug(f'timechunk: {timechunk}')
             njobs = int(math.ceil(len(time_idx) / timechunk))
-            job_idx = [
-                i for i in range(njobs)
-                if not Path(donepath_tpl.format(dim=dim, zoom=zoom, job_id=i)).exists()
-            ]
-            tgt_time_calcs = [
-                {
-                    'start_idx': i * timechunk,
-                    'end_idx': (i + 1) * timechunk,
-                    'donepath': donepath_tpl.format(dim=dim, zoom=zoom, job_id=i),
-                }
-                for i in job_idx
-            ]
+            job_idx = [i for i in range(njobs) if not Path(donepath_tpl.format(dim=dim, zoom=zoom, job_id=i)).exists()]
+            tgt_time_calcs = [{'start_idx': i * timechunk, 'end_idx': (i + 1) * timechunk,
+                'donepath': donepath_tpl.format(dim=dim, zoom=zoom, job_id=i), } for i in job_idx]
             for tgt_times in batched(tgt_time_calcs, nbatch):
-                tasks.append(
-                    {
-                        'task_type': 'coarsen',
-                        'config_path': ctx.obj['config_path'],
-                        'config_key': config_key,
-                        'tgt_zoom': zoom,
-                        'dim': dim,
-                        'tgt_times': tgt_times,
-                    }
-                )
+                tasks.append({'task_type': 'coarsen', 'config_path': ctx.obj['config_path'], 'config_key': config_key,
+                    'tgt_zoom': zoom, 'dim': dim, 'tgt_times': tgt_times, })
             if len(tasks):
                 logger.info(f'- running {len(tasks)} tasks')
                 if dim == '3d':
@@ -349,14 +309,9 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
                 # The heart of this method is a ds.coarsen(cell=4).mean() call.
                 # This benefits massively from a dask speed up.
                 # Request lots of cores per task.
-                slurm_script_path = write_tasks_slurm_job_array(
-                    ctx.obj['config'].slurm_config,
-                    config_key, tasks, f'coarsen_{dim}_{zoom}',
-                    depends_on=prev_zoom_job_id,
-                    partition='standard',
-                    nconcurrent_tasks=nconcurrent_tasks,
-                    mem=mem,
-                    qos='high',
+                slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks,
+                    f'coarsen_{dim}_{zoom}', depends_on=prev_zoom_job_id, partition='standard',
+                    nconcurrent_tasks=nconcurrent_tasks, mem=mem, qos='high',
                     # cpus_per_task=48,  # maxes out at 6 tasks/288 cpus because of max cpus.
                     cpus_per_task=12,  # maxes out at 24 tasks/288 cpus because of max cpus.
                 )
@@ -388,18 +343,14 @@ def check_output_mapping(ctx, config_key, date, output_file, interactive):
     import iris
     import operator
 
-    operator_symbol_map = {
-        operator.add: '+',
-        operator.sub: '-',
-        operator.mul: '*',
-        operator.truediv: '/',
-    }
+    operator_symbol_map = {operator.add: '+', operator.sub: '-', operator.mul: '*', operator.truediv: '/', }
     if config_key == 'all':
         config_keys = list(ctx.obj['config'].processing_config)
     else:
         config_keys = [config_key]
 
-    cols = ['expt', 'store', 'short_name', 'long_name', 'present', 'cube_name', 'stash_code', 'extra_attrs']
+    cols = ['expt', 'store', 'variable_id', 'standard_name', 'units', 'is_present', 'cube_name', 'stash_code',
+            'extra_attrs', 'extra_processing']
     data = []
     for config_key in config_keys:
         # TODO: can't load data for Africa or SEA CTC??
@@ -427,6 +378,10 @@ def check_output_mapping(ctx, config_key, date, output_file, interactive):
             for key, map_item in name_map.items():
                 logger.debug(f'  {key}: {map_item}')
                 short_name, long_name = key
+                extra_processing = map_item.extra_processing
+
+                if extra_processing and not isinstance(extra_processing, str):
+                    extra_processing = extra_processing.__name__
                 try:
                     item_cubes = extractor.extract_cubes(map_item, group_cubes)
                     if len(item_cubes) == 1:
@@ -443,13 +398,13 @@ def check_output_mapping(ctx, config_key, date, output_file, interactive):
                             stash_list.extend([operator_symbol_map[op], str(next_cube.attributes['STASH'])])
                         cubestr = ' '.join(cube_list)
                         stashstr = ' '.join(stash_list)
-                    data.append(
-                        str(v) for v in [config_key, store, short_name, long_name, True, cubestr, stashstr, map_item.extra_attrs]
-                    )
+                    units = map_item.units if map_item.units is not None else str(cube.units)
+                    data.append(str(v) for v in
+                                [config_key, store, short_name, long_name, units, True, cubestr, stashstr,
+                                 map_item.extra_attrs, extra_processing])
                 except iris.exceptions.ConstraintMismatchError as cme:
-                    data.append(
-                        str(v) for v in [config_key, store, short_name, long_name, False, None, None, map_item.extra_attrs]
-                    )
+                    data.append(str(v) for v in [config_key, store, short_name, long_name, None, False, None, None,
+                                                 map_item.extra_attrs, extra_processing])
 
     df = pd.DataFrame(data, columns=cols)
     if output_file is not None:
@@ -464,6 +419,7 @@ def title(msg):
     print(msg)
     print('=' * len(msg))
 
+
 @cli.command()
 @click.option('--input-file', '-i')
 @click.pass_context
@@ -474,12 +430,8 @@ def analyse_output_mapping(ctx, input_file):
     comparison_cols = df.drop(columns='expt')
     # Get a df with the number of times each row (ignoring 'expt') is duplicated and combine with existing df.
     duplicate_counts = comparison_cols.groupby(comparison_cols.columns.tolist()).size()
-    df_with_counts = df.merge(
-        duplicate_counts.rename("counts"),
-        how='left',
-        left_on=comparison_cols.columns.tolist(),
-        right_index=True
-    )
+    df_with_counts = df.merge(duplicate_counts.rename("counts"), how='left', left_on=comparison_cols.columns.tolist(),
+        right_index=True)
 
     # Find the first set of non-duplicated rows for any row which appears as many times as there are expts.
     # i.e. each row is the same across all expts.
@@ -494,6 +446,7 @@ def analyse_output_mapping(ctx, input_file):
     for var in interesting_inputs:
         title(f'Interesting var: {var}')
         print(df[df.short_name == var])
+
 
 @cli.command()
 @click.argument('args', nargs=-1)
@@ -511,6 +464,7 @@ def print_config(ctx, list_keys, args):
         pprint.pprint(list(config))
     else:
         pprint.pprint(config)
+
 
 if __name__ == '__main__':
     cli(obj={})
