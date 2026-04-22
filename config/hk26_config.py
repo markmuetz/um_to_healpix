@@ -136,8 +136,8 @@ name_map_2d = {
     ('psl', 'air_pressure_at_mean_sea_level'): MapItem('air_pressure_at_sea_level'),
     ('tas', 'air_temperature'): MapItem('air_temperature'),
     # Replaced following https://github.com/markmuetz/um_to_healpix/issues/5
-    ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('m01s02i391'),
-    ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('m01s02i392'),
+    ('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'): MapItem('m01s02i391', units='kg m-2'),
+    ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('m01s02i392', units='kg m-2'),
     ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461', units='kg m-2'),
     # Turn into a percentage to match standards.
     ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap', extra_processing=make_percentage, units='%'),
