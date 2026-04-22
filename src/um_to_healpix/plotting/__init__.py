@@ -31,7 +31,7 @@ def plot_all_fields(ds_plot):
     projection = ccrs.Robinson(central_longitude=0)
     das = {}
     for name, da in ds_plot.data_vars.items():
-        if name == 'mrso':
+        if name == 'mrsol':
             das.update({name + str(i): da[i] for i in range(len(da.depth))})
         else:
             das[name] = da

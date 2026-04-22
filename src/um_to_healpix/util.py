@@ -181,5 +181,33 @@ def open_remote_dataset(config, sim, freq, zoom, on_jasmin=False):
     print(url)
 
     ds = xr.open_dataset(url, engine='zarr')
-    ds = ds.pipe(egh.attach_coords)
+    ds = ds.pipe(attach_coords)
     return ds
+
+
+def attach_coords(ds: xr.Dataset, signed_lon=False):
+    # Same as egh.attach_coords but swap cell for healpix_index.
+    ds = egh.fix_crs(ds)
+
+    healpix_index = ds.get("healpix_index") if "healpix_index" in ds.dims else np.arange(egh.get_npix(ds))
+
+    lons, lats = egh.healpix.pix2ang(egh.get_nside(ds), healpix_index, nest=egh.get_nest(ds), lonlat=True)
+    if signed_lon:
+        lons = np.where(lons <= 180, lons, lons - 360)
+    else:
+        # Both healpy and healpix produce longitudes in the range [-45, 360]
+        # While this is mathematically valid, it may be unexpected in Earth system science.
+        lons %= 360
+    return ds.assign_coords(
+        healpix_index=healpix_index,
+        lat=(
+            ("healpix_index",),
+            lats,
+            {"units": "degree_north", "standard_name": "latitude", "axis": "Y"},
+        ),
+        lon=(
+            ("healpix_index",),
+            lons,
+            {"units": "degree_east", "standard_name": "longitude", "axis": "X"},
+        ),
+    )

@@ -34,9 +34,12 @@ config = load_config('../config/hk26_config.py')
 
 def zooms_for_sim(sim):
     if sim == 'glm.n2560_RAL3p3.tuned':
+        # zooms = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
         zooms = [10, 9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+        zooms = [10]
     elif sim == 'glm.n1280_CoMA9':
-        zooms = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+        # zooms = [9, 8, 7, 6, 5, 4, 3, 2, 1, 0]
+        zooms = [9]
     return zooms
 
 
@@ -59,7 +62,8 @@ class CreateLocalDataCache(Rule):
 
     @staticmethod
     def rule_run(inputs, outputs, sim):
-        logger.debug(f'{inputs}, {outputs}, {sim}')
+        logger.info(f'{inputs}, {outputs}, {sim}')
+
         config = load_config('../config/hk26_config.py')
         zooms = zooms_for_sim(sim)
         start_date = pd.Timestamp('2020-01-20 01:00:00')
@@ -79,9 +83,6 @@ class CreateLocalDataCache(Rule):
                 logger.debug(f'{output} already created')
             else:
                 ds = open_remote_dataset(config, sim, 'PT1H', zoom)
-                # dicts and bools cannot be written to a .nc dataset.
-                ds.attrs['bounds'] = str(ds.attrs['bounds'])
-                ds.attrs['regional'] = str(ds.attrs['regional'])
                 ds.sel(time=end_date).to_netcdf(output)
 
         output = outputs[f'pr_long.z0']
@@ -148,11 +149,11 @@ class PlotSanityChecks(Rule):
         timeslice = slice(4000, 5000)
         fig, axes = plt.subplots(2, 1, figsize=(width_px / dpi, 10), dpi=dpi, layout='constrained')
         hours = np.arange(len(ds.time))
-        axes[0].plot(hours, ds.pr.mean(dim='cell'))
+        axes[0].plot(hours, ds.pr.mean(dim='healpix_index'))
         axes[0].axvline(x=timeslice.start, c='k', ls='--')
         axes[0].axvline(x=timeslice.stop, c='k', ls='--')
 
-        axes[1].plot(hours[timeslice], ds.pr.isel(time=timeslice).mean(dim='cell'))
+        axes[1].plot(hours[timeslice], ds.pr.isel(time=timeslice).mean(dim='healpix_index'))
         plt.xlabel('hour')
         for ax in axes:
             ax.set_ylabel(f'{ds.pr.long_name} ({ds.pr.attrs.get("units", "-")})')
@@ -196,7 +197,7 @@ class PlotSanityChecks(Rule):
         time = '2020-01-25 00:00'
         clw = open_remote_dataset(config, sim, freq='PT3H', zoom=zoom).clw.sel(time=time)
         plt.figure()
-        plt.plot(clw.mean(dim='cell'), clw.pressure)
+        plt.plot(clw.mean(dim='healpix_index'), clw.pressure)
         plt.ylim((1000, 0))
         plt.xlabel(f'{clw.long_name} ({clw.attrs.get("units", "-")})')
         plt.ylabel('pressure (hPa)')
