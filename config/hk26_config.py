@@ -39,14 +39,14 @@ slurm_config = dict(
 )
 
 shared_metadata = {
-    'Met Office DYAMOND3 simulations': (
-        'A group of experiments have been conducted using the Met Office Unified Model (MetUM) with a focus on the '
-        'DYAMOND-3 period (Jan 2020-Feb 2021). While this experiments include standalone explicit convection global '
-        'simulations we have also developed a cyclic tropical channel and include limited area model simulations to '
-        'build our understanding of how resolving smaller-scale processes feeds back on to the large-scale '
-        'atmospheric circulation.'),
-}
-
+    'processing_version': output_vn,
+    'deploy': deploy,
+    'summary': (
+        'Met Office DYAMOND3 simulations: A group of experiments have been conducted using the Met Office Unified '
+        'Model (MetUM) with a focus on the DYAMOND-3 period (Jan 2020-Feb 2021). While these experiments include '
+        'standalone explicit convection global simulations we have also developed a cyclic tropical channel and '
+        'include limited area model simulations to build our understanding of how resolving smaller-scale processes '
+        'feeds back on to the large-scale atmospheric circulation.'), }
 
 # Aim for chunk sizes between 1-10MB.
 chunks2d = {
@@ -140,7 +140,8 @@ name_map_2d = {
     ('clivi', 'atmosphere_mass_content_of_cloud_ice'): MapItem('m01s02i392', units='kg m-2'),
     ('prw', 'atmosphere_mass_content_of_water_vapor'): MapItem('m01s30i461', units='kg m-2'),
     # Turn into a percentage to match standards.
-    ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap', extra_processing=make_percentage, units='%'),
+    ('clt', 'cloud_area_fraction'): MapItem('cloud_area_fraction_assuming_maximum_random_overlap',
+                                            extra_processing=make_percentage, units='%'),
     ('uas', 'eastward_wind'): MapItem('x_wind'),
     ('vas', 'northward_wind'): MapItem('y_wind'),
     ('pr', 'precipitation_flux'): MultiMapItem(
@@ -150,14 +151,15 @@ name_map_2d = {
              cube_func=cube_cell_method_is_not_empty))],
         ops=[operator.add],
         extra_attrs={
-            'notes': 'Combined rain and snow. Hourly mean - time index shifted from half past the hour to the following hour'},
+            'notes': 'Combined rain and snow. Hourly mean - time index shifted from half past the hour to the '
+                     'following hour'},
     ),
     # Non-standard variable - not in: https://clipc-services.ceda.ac.uk/dreq/index/var.html
     ('prs', 'solid_precipitation_flux'): MapItem(
         iris.Constraint(name='stratiform_snowfall_flux') & iris.Constraint(
             cube_func=cube_cell_method_is_not_empty),
         extra_attrs={'notes': 'Hourly mean - time index shifted from half past the hour to the following hour'},
-        ),
+    ),
     ('huss', 'specific_humidity'): MapItem('specific_humidity'),
     ('ps', 'surface_air_pressure'): MapItem('surface_air_pressure'),
     # originally hflsd, hfssd, but these are not the standard variable names:
@@ -175,18 +177,23 @@ name_map_2d = {
     ('ts', 'surface_temperature'): MapItem('surface_temperature'),
     ('rsdt', 'toa_incoming_shortwave_flux'): MapItem('toa_incoming_shortwave_flux'),
     ('rlut', 'toa_outgoing_longwave_flux'): MapItem('toa_outgoing_longwave_flux'),
-    ('rlutcs', 'toa_outgoing_longwave_flux_assuming_clear_sky'): MapItem('toa_outgoing_longwave_flux_assuming_clear_sky'),
+    ('rlutcs', 'toa_outgoing_longwave_flux_assuming_clear_sky'): MapItem(
+        'toa_outgoing_longwave_flux_assuming_clear_sky'),
     ('rsut', 'toa_outgoing_shortwave_flux'): MapItem(iris.Constraint(
         name='toa_outgoing_shortwave_flux') & iris.AttributeConstraint(
         STASH='m01s01i208')),
-    ('rsutcs', 'toa_outgoing_shortwave_flux_assuming_clear_sky'): MapItem('toa_outgoing_shortwave_flux_assuming_clear_sky'),
-    ('rsus', 'surface_upwelling_shortwave_flux_in_air'): MapItem('m01s01i202', extra_processing=invert_cube_sign, units='W m-2'),
-    ('rlus', 'surface_upwelling_longwave_flux_in_air'): MapItem('surface_net_downward_longwave_flux', extra_processing=invert_cube_sign),
+    ('rsutcs', 'toa_outgoing_shortwave_flux_assuming_clear_sky'): MapItem(
+        'toa_outgoing_shortwave_flux_assuming_clear_sky'),
+    ('rsus', 'surface_upwelling_shortwave_flux_in_air'): MapItem('m01s01i202', extra_processing=invert_cube_sign,
+                                                                 units='W m-2'),
+    ('rlus', 'surface_upwelling_longwave_flux_in_air'): MapItem('surface_net_downward_longwave_flux',
+                                                                extra_processing=invert_cube_sign),
 }
 
 # Add this in. Note, it's a 3D field with a vertical coord of depth, but it's at PT1H, so put in with the 2d vars.
 name_map_2d_depth = {
-    # Originally mrso but this is the standard for soil moisture in layers.
+    # Originally mrso but mrsol is the standard for soil moisture in layers.
+    # https://clipc-services.ceda.ac.uk/dreq/index/var.html
     ('mrsol', 'mass_content_of_water_in_soil_layer'): MapItem('moisture_content_of_soil_layer'),
 }
 
@@ -258,8 +265,8 @@ group3d_ml = {
 
 # Idea is to map to e.g. these filenames.
 # Global:
-# ./10km-CoMA9/glm/field.pp/apvera.pp/glm.n1280_CoMA9.apvera_20200120T00.pp
 # ./5km-RAL3/glm/field.pp/apvera.pp/glm.n2560_RAL3p3.apvera_20200120T00.pp
+# ./10km-CoMA9/glm/field.pp/apvera.pp/glm.n1280_CoMA9.apvera_20200120T00.pp
 # ./10km-GAL9-nest/glm/field.pp/apvera.pp/glm.n1280_GAL9_nest.apvera_20200120T00.pp
 global_sim_keys = {
     'glm.n2560_RAL3p3.tuned': '5km-RAL3p3-tuned',
@@ -285,7 +292,8 @@ group2d_GAL9['name_map'][('pr', 'precipitation_flux')] = MultiMapItem(
     ],
     ops=[operator.add, operator.add, operator.add],
     extra_attrs={
-        'notes': 'Combined rain and snow, convective and stratiform. Hourly mean - time index shifted from half past the hour to the following hour'},
+        'notes': 'Combined rain and snow, convective and stratiform. Hourly mean - time index shifted from half past '
+                 'the hour to the following hour'},
 )
 
 # For CoMA9 simulations, use the instantaneous total precipitation.
@@ -295,7 +303,7 @@ group2d_CoMA9['name_map'][('pr', 'precipitation_flux')] = MapItem(
     extra_processing=check_cube_time_length,
     extra_attrs={
         'notes': 'Uses instantaneous total precipitation'},
-    )
+)
 
 group3d_ml_CoMA9 = copy.deepcopy(group3d_ml)
 
@@ -367,12 +375,15 @@ global_configs['glm.n2560_RAL3p3.tuned']['metadata'].update({
                                'high-resolution (regional) simulations.'),
 })
 
+
 # Construct global configs
 # ========================
 # Regional:
-# ./10km-GAL9-nest/Africa_km4p4_CoMA9_TBv1/field.pp/apvera.pp/Africa_km4p4_CoMA9_TBv1.n1280_GAL9_nest.apvera_20200120T00.pp
+# ./10km-GAL9-nest/Africa_km4p4_CoMA9_TBv1/field.pp/apvera.pp/Africa_km4p4_CoMA9_TBv1.n1280_GAL9_nest
+# .apvera_20200120T00.pp
 # ./10km-GAL9-nest/Africa_km4p4_RAL3P3/field.pp/apvera.pp/Africa_km4p4_RAL3P3.n1280_GAL9_nest.apvera_20200120T00.pp
-# ./10km-GAL9-nest/SAmer_km4p4_CoMA9_TBv1/field.pp/apvera.pp/SAmer_km4p4_CoMA9_TBv1.n1280_GAL9_nest.apvera_20200120T00.pp
+# ./10km-GAL9-nest/SAmer_km4p4_CoMA9_TBv1/field.pp/apvera.pp/SAmer_km4p4_CoMA9_TBv1.n1280_GAL9_nest
+# .apvera_20200120T00.pp
 # ./10km-GAL9-nest/SAmer_km4p4_RAL3P3/field.pp/apvera.pp/SAmer_km4p4_RAL3P3.n1280_GAL9_nest.apvera_20200120T00.pp
 # ./10km-GAL9-nest/SEA_km4p4_CoMA9_TBv1/field.pp/apvera.pp/SEA_km4p4_CoMA9_TBv1.n1280_GAL9_nest.apvera_20200120T00.pp
 # ./10km-GAL9-nest/SEA_km4p4_RAL3P3/field.pp/apvera.pp/SEA_km4p4_RAL3P3.n1280_GAL9_nest.apvera_20200120T00.pp
@@ -382,6 +393,7 @@ global_configs['glm.n2560_RAL3p3.tuned']['metadata'].update({
 def map_regional_key_to_path(simdir, regional_key):
     sim_key, _ = regional_key.split('.')
     return Path(f'/gws/nopw/j04/kscale/DYAMOND3_data/{simdir}/{sim_key}')
+
 
 regional_sim_keys = {
     'SAmer_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
@@ -408,7 +420,8 @@ regional_configs = {
         'regional': True,
         # TODO: I think that the CTC simulation has a high enough res that there are no healpix coords outside
         # its domain - check.
-        # Orig: I think this should be true for CTC, but it's raising an error: ValueError: The coordinate must be equally spaced.
+        # Orig: I think this should be true for CTC, but it's raising an error: ValueError: The coordinate must be
+        # equally spaced.
         # 'add_cyclic': key.startswith('CTC'),  # only difference from regional.
         'add_cyclic': False,
         'basedir': dy3dir / f'{simdir}/glm',
