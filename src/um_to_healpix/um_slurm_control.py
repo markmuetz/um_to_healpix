@@ -239,9 +239,11 @@ def process(ctx, endtime, config_key):
     if len(tasks):
         # Run tasks.
         logger.info(f'Running {len(tasks)} tasks')
+        # regional sims do not use multi procs because a) they're quick to regrid and b) I haven't handled them.
+        cpus_per_task = 1 if config['regional'] else 6
         slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks, 'regrid',
                                                         nconcurrent_tasks=nconcurrent_tasks, qos='high',
-                                                        cpus_per_task=6, depends_on=create_jobid)
+                                                        cpus_per_task=cpus_per_task, depends_on=create_jobid)
         logger.debug(slurm_script_path)
         if not ctx.obj['dry_run']:
             regrid_jobid = sbatch(slurm_script_path)

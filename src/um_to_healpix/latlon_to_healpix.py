@@ -142,6 +142,7 @@ class LatLon2HealpixRegridder:
             self.regional_chunks = regional_chunks
         if method.startswith('easygems_delaunay'):
             self.weights = weights
+            self.weights['weights'] = self.weights['weights'].astype(np.float32)
         self.nproc = nproc
 
     def regrid(self, da, lonname, latname):
@@ -242,7 +243,7 @@ class LatLon2HealpixRegridder:
         data_buffer = np.ascontiguousarray(da_flat.values)
         # Ensure weights are numpy to avoid overhead in the loop
         weights_np = {k: (v.values if hasattr(v, 'values') else v) for k, v in self.weights.items()}
-        weights_np['weights'] = weights_np['weights'].astype(np.float32)
+        # weights_np['weights'] = weights_np['weights'].astype(np.float32)
 
         def parallel_regrid(idx):
             # egr.apply_weights releases the GIL during the sum/multiply
