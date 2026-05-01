@@ -278,8 +278,8 @@ global_sim_keys = {
 # ============================================
 
 # For GAL9 simulations, combine stratiform and convective, rainfall and snow.
-group2d_GAL9 = copy.deepcopy(group2d)
-group2d_GAL9['name_map'][('pr', 'precipitation_flux')] = MultiMapItem(
+group2d_GAL9_v2 = copy.deepcopy(group2d)
+group2d_GAL9_v2['name_map'][('pr', 'precipitation_flux')] = MultiMapItem(
     [
         MapItem(iris.Constraint(name='convective_rainfall_flux') & iris.Constraint(
             cube_func=cube_cell_method_is_not_empty)),
@@ -306,12 +306,17 @@ group2d_CoMA9['name_map'][('pr', 'precipitation_flux')] = MapItem(
 )
 
 group3d_ml_CoMA9 = copy.deepcopy(group3d_ml)
+group3d_ml_CoMA9['name_map'].pop(('qs', 'mass_fraction_of_snow_water_in_air'))
+
+group3d_ml_GAL9_v2 = copy.deepcopy(group3d_ml)
+group3d_ml_GAL9_v2['name_map'].pop(('qg', 'mass_fraction_of_graupel_in_air'))
+group3d_ml_GAL9_v2['name_map'].pop(('qs', 'mass_fraction_of_snow_water_in_air'))
 
 # Build a mapping to go from key to the correct 2d group
 group2d_global_map = {}
 for key in global_sim_keys:
     if key.endswith('GAL9_v2'):
-        group2d_global_map[key] = group2d_GAL9
+        group2d_global_map[key] = group2d_GAL9_v2
     elif key.endswith('CoMA9'):
         group2d_global_map[key] = group2d_CoMA9
     else:
@@ -319,8 +324,8 @@ for key in global_sim_keys:
 
 group3d_ml_global_map = {}
 for key in global_sim_keys:
-    if key.endswith('GAL9_nest'):
-        group3d_ml_global_map[key] = group3d_ml
+    if key.endswith('GAL9_v2'):
+        group3d_ml_global_map[key] = group3d_ml_GAL9_v2
     elif key.endswith('CoMA9'):
         group3d_ml_global_map[key] = group3d_ml_CoMA9
     else:

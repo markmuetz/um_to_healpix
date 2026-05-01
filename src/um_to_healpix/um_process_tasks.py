@@ -379,10 +379,11 @@ class UMProcessTasks:
             for group_name, group in self.config['groups'].items()
         }
 
-        add_orog = not regional
+        # TODO: handle regional.
+        # TODO: Get working for n1280!
+        add_orog = not regional and 'n1280' not in task['config_key']
 
         if add_orog:
-            # TODO: handle regional.
             orog_land_sea = self._gen_orog_land_sea()
 
         # Create one zarr store with metadata for all variables for each zoom.
