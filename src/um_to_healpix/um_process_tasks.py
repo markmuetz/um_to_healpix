@@ -76,10 +76,12 @@ def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, ad
     latname = [c for c in da.coords if c.startswith('latitude')][0]
     logger.trace(f'  - using weights: {weights}')
 
-    # regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay', zoom_level=zoom,
-    #                                     add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
-    regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay_parallel', nproc=6, zoom_level=zoom,
-                                        add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
+    if regional:
+        regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay', zoom_level=zoom,
+                                            add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
+    else:
+        regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay_parallel', nproc=6, zoom_level=zoom,
+                                            add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
 
     # These have to be dropped before you cyclic pad *some* data arrays, or you will get a coord mismatch.
     drop_vars_exists = list(set(drop_vars) & set(k for k in da.coords.keys()))
@@ -171,7 +173,7 @@ def get_regional_bounds(da):
         }
         return str(bounds)
     else:
-        return None
+        return str(None)
 
 
 class UMProcessTasks:
@@ -402,7 +404,7 @@ class UMProcessTasks:
                     if regional:
                         if metadata['regional_bounds'] is None:
                             metadata['regional_bounds'] = get_regional_bounds(da)
-                            logger.debug('regional_bounds={}'.format(metadata['bounds']))
+                            logger.debug('regional_bounds={}'.format(metadata['regional_bounds']))
                     ds_tpls[zarr_store_name][da_tpl.name] = da_tpl
                     if add_orog:
                         ds_tpls[zarr_store_name]['orog'] = orog_land_sea[zoom].orog

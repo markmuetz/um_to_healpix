@@ -376,45 +376,30 @@ global_configs['glm.n2560_RAL3p3.tuned']['metadata'].update({
 })
 
 
-# Construct global configs
-# ========================
-# Regional:
-# ./10km-GAL9-nest/Africa_km4p4_CoMA9_TBv1/field.pp/apvera.pp/Africa_km4p4_CoMA9_TBv1.n1280_GAL9_nest
-# .apvera_20200120T00.pp
-# ./10km-GAL9-nest/Africa_km4p4_RAL3P3/field.pp/apvera.pp/Africa_km4p4_RAL3P3.n1280_GAL9_nest.apvera_20200120T00.pp
-# ./10km-GAL9-nest/SAmer_km4p4_CoMA9_TBv1/field.pp/apvera.pp/SAmer_km4p4_CoMA9_TBv1.n1280_GAL9_nest
-# .apvera_20200120T00.pp
-# ./10km-GAL9-nest/SAmer_km4p4_RAL3P3/field.pp/apvera.pp/SAmer_km4p4_RAL3P3.n1280_GAL9_nest.apvera_20200120T00.pp
-# ./10km-GAL9-nest/SEA_km4p4_CoMA9_TBv1/field.pp/apvera.pp/SEA_km4p4_CoMA9_TBv1.n1280_GAL9_nest.apvera_20200120T00.pp
-# ./10km-GAL9-nest/SEA_km4p4_RAL3P3/field.pp/apvera.pp/SEA_km4p4_RAL3P3.n1280_GAL9_nest.apvera_20200120T00.pp
-# Cyclic Tropical Channel (CTC):
-# ./10km-GAL9-nest/CTC_km4p4_CoMA9_TBv1/field.pp/apvera.pp/CTC_km4p4_CoMA9_TBv1.n1280_GAL9_nest.apvera_20200120T00.pp
-# ./10km-GAL9-nest/CTC_km4p4_RAL3P3/field.pp/apvera.pp/CTC_km4p4_RAL3P3.n1280_GAL9_nest.apvera_20200120T00.pp
-def map_regional_key_to_path(simdir, regional_key):
-    sim_key, _ = regional_key.split('.')
-    return Path(f'/gws/nopw/j04/kscale/DYAMOND3_data/{simdir}/{sim_key}')
-
-
 regional_sim_keys = {
-    'SAmer_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
-    'Africa_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
-    'SEA_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
-    'SAmer_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
-    'Africa_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
-    'SEA_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
-    'CTC_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
-    'CTC_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
+    'Africa_km4p4_RAL3P3.n1280_CoMA9': ('5km-CoMA9', 'Africa_km4p4_RAL3P3'),
+    # 'Africa_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
+    # 'SEA_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
+    # 'SAmer_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
+    # 'Africa_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
+    # 'SEA_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
+    # 'CTC_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
+    # 'CTC_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
 }
 
 group2d_regional = copy.deepcopy(group2d)
 group3d_regional = copy.deepcopy(group3d)
 group3d_ml_regional = copy.deepcopy(group3d_ml)
+# TODO: Check this shouldn't be there.
+# 'm01s02i391'
+group2d_regional['name_map'].pop(('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'))
 
 # Note, these use different chunking.
 group2d_regional['chunks'] = chunks2dregional
 group3d_regional['chunks'] = chunks3dregional
 group3d_ml_regional['chunks'] = chunks3dregional
 
+# /gws/nopw/j04/kscale/DYAMOND3_reruns/5km-CoMA9
 regional_configs = {
     key: {
         'regional': True,
@@ -424,7 +409,7 @@ regional_configs = {
         # equally spaced.
         # 'add_cyclic': key.startswith('CTC'),  # only difference from regional.
         'add_cyclic': False,
-        'basedir': dy3dir / f'{simdir}/glm',
+        'basedir': dy3dir / f'{nestdir}' / f'{simdir}',
         'weightsdir': weightsdir,
         'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
@@ -441,10 +426,10 @@ regional_configs = {
             'simulation': key,
         }
     }
-    for key, simdir in regional_sim_keys.items()
+    for key, (nestdir, simdir) in regional_sim_keys.items()
 }
 
 processing_config = {
     **global_configs,
-    # **regional_configs,
+    **regional_configs,
 }
