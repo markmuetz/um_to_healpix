@@ -146,9 +146,9 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
         if da.name == 'weights':
             if src_ds_time_slice.time[0] == src_ds.time[0]:
                 if dim == '2d':
-                    region = {'healpix_index': slice(None)}
+                    wregion = {'healpix_index': slice(None)}
                     asyncio.run(
-                        async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))
+                        async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, wregion))
                 elif dim == '3d':
                     # TODO: still causes error due to dims mismatch.
                     logger.warning('Not writing weights for 3D data')
@@ -156,5 +156,10 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
                     # asyncio.run(
                     #     async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))
             continue
-        asyncio.run(
-            async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))
+        if da.name == 'mrsol':
+            dregion = {'time': time_slice, 'depth': slice(None), 'healpix_index': slice(None)}
+            asyncio.run(
+                async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, dregion))
+        else:
+            asyncio.run(
+                async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))
