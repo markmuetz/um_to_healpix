@@ -14,8 +14,8 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
     invert_cube_sign, check_cube_time_length, make_percentage
 
 # Global config.
-output_vn = 'v6.7.cf_compliance'
-deploy = 'dev'
+output_vn = 'v7'
+deploy = 'prod'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
 # hrcm GWS not available.
