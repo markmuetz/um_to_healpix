@@ -75,13 +75,13 @@ def _parse_date_from_pp_path(path):
         return pd.to_datetime(datestr, format="%Y%m%dT%H")
 
 
-def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, comment=None, **kwargs):
+def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, job_id, depends_on=None, comment=None, **kwargs):
     """Write out a script for submission."""
     now = pd.Timestamp.now()
     date_string = now.strftime("%Y%m%d_%H%M%S")
 
-    tasks_path = Path(f'slurm/tasks/tasks_{job_name}_{config_key}_{date_string}.json')
-    logger.debug(tasks_path)
+    tasks_path = Path(f'slurm/tasks/tasks_{job_id}_{config_key}_{date_string}.json')
+    logger.info(f'Written tasks to: {tasks_path}')
     logger.trace(json.dumps(tasks, indent=4))
 
     if depends_on:
@@ -95,7 +95,7 @@ def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depen
     if comment is None:
         comment = f'{config_key},{job_name}'
 
-    slurm_script_path = Path(f'slurm/scripts/script_{job_name}_{config_key}_{date_string}.sh')
+    slurm_script_path = Path(f'slurm/scripts/script_{job_id}_{config_key}_{date_string}.sh')
     njobs = len(tasks) - 1
     slurm_kwargs = {**slurm_config, **kwargs}
     script_kwargs = dict(job_name=job_name, config_key=config_key, njobs=njobs, tasks_path=tasks_path,
@@ -215,7 +215,7 @@ def process(ctx, endtime, config_key):
                     'config_key': config_key, 'date': str(date), 'inpaths': [str(p) for p in dates_to_paths[date]],
                     'donepath': str(create_donepath), }
                 slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key,
-                                                                [create_task], f'createzarr',
+                                                                [create_task], f'createzarr', 'createzarr',
                                                                 nconcurrent_tasks=nconcurrent_tasks)
                 logger.debug(slurm_script_path)
                 create_donepath.parent.mkdir(parents=True, exist_ok=True)
@@ -242,7 +242,7 @@ def process(ctx, endtime, config_key):
         logger.info(f'Running {len(tasks)} tasks')
         # regional sims do not use multi procs because a) they're quick to regrid and b) I haven't handled them.
         cpus_per_task = 1 if config['regional'] else 6
-        slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks, 'regrid',
+        slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks, 'regrid', 'regrid',
                                                         nconcurrent_tasks=nconcurrent_tasks, qos='high',
                                                         cpus_per_task=cpus_per_task, depends_on=create_jobid)
         logger.debug(slurm_script_path)
@@ -309,12 +309,12 @@ def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
                 if dim == '3d':
                     mem = 100000
                 else:
-                    mem = 10000
+                    mem = 20000
                 # The heart of this method is a ds.coarsen(cell=4).mean() call.
                 # This benefits massively from a dask speed up.
                 # Request lots of cores per task.
                 slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks,
-                    'coarsen', comment=f'regrid:{dim},{zoom}', depends_on=prev_zoom_job_id, partition='standard',
+                    'coarsen', f'regrid_{dim}_{zoom}', comment=f'regrid:{dim},{zoom}', depends_on=prev_zoom_job_id, partition='standard',
                     nconcurrent_tasks=nconcurrent_tasks, mem=mem, qos='high',
                     # cpus_per_task=48,  # maxes out at 6 tasks/288 cpus because of max cpus.
                     cpus_per_task=12,  # maxes out at 24 tasks/288 cpus because of max cpus.
