@@ -75,7 +75,7 @@ def _parse_date_from_pp_path(path):
         return pd.to_datetime(datestr, format="%Y%m%dT%H")
 
 
-def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, **kwargs):
+def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depends_on=None, comment=None, **kwargs):
     """Write out a script for submission."""
     now = pd.Timestamp.now()
     date_string = now.strftime("%Y%m%d_%H%M%S")
@@ -92,7 +92,8 @@ def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, depen
     with tasks_path.open('w') as f:
         json.dump(tasks, f, indent=4)
 
-    comment = f'{config_key},{job_name}'
+    if comment is None:
+        comment = f'{config_key},{job_name}'
 
     slurm_script_path = Path(f'slurm/scripts/script_{job_name}_{config_key}_{date_string}.sh')
     njobs = len(tasks) - 1
@@ -261,9 +262,10 @@ def process(ctx, endtime, config_key):
 # Make this too low and e.g. coarsen_3d_8 seems to complain on writing to obj store.
 @click.option('--nbatch', '-B', default=10, help='number of subtasks for each job to run')
 @click.option('--endtime', '-E', default='2022-01-01 00:00')
+@click.option('--dep-job-id', '-D', default=None)
 @click.argument('config_key')
 @click.pass_context
-def coarsen(ctx, dims, nbatch, endtime, config_key):
+def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
     if dims == 'both':
         dims = ['2d', '3d']
     else:
@@ -278,7 +280,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
     max_zoom = config['max_zoom']
 
     for dim in dims:
-        prev_zoom_job_id = None
+        prev_zoom_job_id = dep_job_id
         if dim == '2d':
             time_idx = ctx.obj['config'].time2d
         elif dim == '3d':
@@ -312,7 +314,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key):
                 # This benefits massively from a dask speed up.
                 # Request lots of cores per task.
                 slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks,
-                    f'coarsen_{dim}_{zoom}', depends_on=prev_zoom_job_id, partition='standard',
+                    'coarsen', comment=f'regrid:{dim},{zoom}', depends_on=prev_zoom_job_id, partition='standard',
                     nconcurrent_tasks=nconcurrent_tasks, mem=mem, qos='high',
                     # cpus_per_task=48,  # maxes out at 6 tasks/288 cpus because of max cpus.
                     cpus_per_task=12,  # maxes out at 24 tasks/288 cpus because of max cpus.
