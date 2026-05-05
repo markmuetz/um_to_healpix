@@ -336,8 +336,8 @@ for key in global_sim_keys:
 orig_base_dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
 orog_land_sea = {
     'glm.n2560_RAL3p3.tuned': orig_base_dir / '5km-RAL3/glm/field.pp/apa.pp/glm.n2560_RAL3p3.apa_20200120T00.pp',
-    'glm.n1280_CoMA9': orig_base_dir / '10km-CoMA9/glm/field.pp/apa.pp/glm.n1280_CoMA9.apa_20200120T00.pp',
-    'glm.n1280_GAL9_v2': orig_base_dir / '10km-CoMA9/glm/field.pp/apa.pp/glm.n1280_CoMA9.apa_20200120T00.pp',
+    'glm.n1280_CoMA9': [dy3dir / 'orography/orography-n1280e.nc', dy3dir / 'landmask/mask-n1280e.nc'],
+    'glm.n1280_GAL9_v2': [dy3dir / 'orography/orography-n1280e.nc', dy3dir / 'landmask/mask-n1280e.nc'],
 }
 
 # Construct global configs

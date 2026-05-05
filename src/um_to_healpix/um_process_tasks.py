@@ -380,8 +380,7 @@ class UMProcessTasks:
         }
 
         # TODO: handle regional.
-        # TODO: Get working for n1280!
-        add_orog = not regional and 'n1280' not in task['config_key']
+        add_orog = not regional
 
         if add_orog:
             orog_land_sea = self._gen_orog_land_sea()
