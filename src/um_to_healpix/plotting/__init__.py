@@ -57,6 +57,7 @@ def plot_all_fields(ds_plot):
         plt.colorbar(im, label=f'{long_name} ({da.attrs.get("units", "-")})')
         ax.coastlines()
 
+
 def plot_timeseries(das):
     for zoom, da in das.items():
         logger.debug('plot_precip', zoom)
@@ -64,6 +65,7 @@ def plot_timeseries(das):
     plt.legend()
     plt.xlabel('hour')
     plt.ylabel(f'{da.long_name} ({da.attrs.get("units", "-")})')
+
 
 def plot_field_for_times(da, callback=None):
     projection = ccrs.Robinson(central_longitude=0)

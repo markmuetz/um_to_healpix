@@ -9,7 +9,7 @@ import pprint
 import subprocess as sp
 import sys
 from collections import defaultdict
-from itertools import batched
+from itertools import batched, product
 from pathlib import Path
 
 import click
@@ -134,7 +134,7 @@ def write_jobids(jobids):
 
 
 @click.group()
-@click.option('--config', '-C', default=Path('config/hk25_config.py'), type=Path)
+@click.option('--config', '-C', default=Path('config/hk26_config.py'), type=Path)
 @click.option('--dry-run', '-n', is_flag=True)
 @click.option('--debug-exception', '-X', is_flag=True)
 @click.option('--debug', '-D', is_flag=True)
@@ -178,9 +178,10 @@ def cli_exit(ctx, result, **kwargs):
 
 @cli.command()
 @click.option('--endtime', '-E', type=pd.Timestamp, default=pd.Timestamp('2022-01-01 00:00'))
+@click.option('--mem', type=int, default=100000)
 @click.argument('config_key')
 @click.pass_context
-def process(ctx, endtime, config_key):
+def process(ctx, endtime, mem, config_key):
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
 
     logger.debug(f'using {nconcurrent_tasks} concurrent tasks')
@@ -244,7 +245,7 @@ def process(ctx, endtime, config_key):
         cpus_per_task = 1 if config['regional'] else 6
         slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks, 'regrid', 'regrid',
                                                         nconcurrent_tasks=nconcurrent_tasks, qos='high',
-                                                        cpus_per_task=cpus_per_task, depends_on=create_jobid)
+                                                        cpus_per_task=cpus_per_task, depends_on=create_jobid, mem=mem)
         logger.debug(slurm_script_path)
         if not ctx.obj['dry_run']:
             regrid_jobid = sbatch(slurm_script_path)
@@ -451,6 +452,66 @@ def analyse_output_mapping(ctx, input_file):
         title(f'Interesting var: {var}')
         print(df[df.short_name == var])
 
+
+@cli.command()
+@click.argument('config_key')
+@click.option('--short', is_flag=True)
+@click.option('--expected-num-inputs', type=int, default=812)
+@click.option('--interactive', '-I', is_flag=True)
+@click.pass_context
+def progress_monitor(ctx, short, expected_num_inputs, interactive, config_key):
+    if config_key == 'all':
+        config_keys = list(ctx.obj['config'].processing_config)
+    else:
+        config_keys = [config_key]
+
+    data = []
+    for config_key in config_keys:
+        config = ctx.obj['config'].processing_config[config_key]
+        basedir = config['basedir']
+        donedir = config['donedir']
+        donepath_tpl = config['donepath_tpl']
+
+        dates_to_paths = find_dyamond3_pp_dates_to_paths(basedir)
+
+        create_donepath = donedir / donepath_tpl.format(task='create_empty_zarr_store', date=config['first_date'])
+        donepaths = [(donedir / donepath_tpl.format(task='regrid', date=date)) for date in dates_to_paths]
+
+        dummy_donepath_tpl = config['donepath_tpl']
+        dummy_donepath = dummy_donepath_tpl.format(task='dummy', date='dummy')
+        donereldir = Path(dummy_donepath).parent
+        donepath_tpl = str(config['donedir'] / donereldir / 'coarsen/{dim}/z{zoom}/{job_id}.done')
+        max_zoom = config['max_zoom']
+        is_coarsen_complete = True
+
+        dims = ['2d', '3d']
+        for dim, zoom in product(dims, range(max_zoom - 1, -1, -1)):
+            if dim == '2d':
+                time_idx = ctx.obj['config'].time2d
+            elif dim == '3d':
+                time_idx = ctx.obj['config'].time3d
+
+            chunks = config['groups'][dim]['chunks']
+            timechunk = chunks[zoom][0]
+            logger.debug(f'timechunk: {timechunk}')
+            njobs = int(math.ceil(len(time_idx) / timechunk))
+            job_idx = [i for i in range(njobs) if
+                       not Path(donepath_tpl.format(dim=dim, zoom=zoom, job_id=i)).exists()]
+            if job_idx:
+                is_coarsen_complete = False
+                break
+
+        data.append((config_key, expected_num_inputs, len(dates_to_paths), create_donepath.exists(), sum(p.exists() for p in donepaths), is_coarsen_complete))
+    df = pd.DataFrame(data, columns=('sim', 'expected_num_inputs', 'num_inputs', 'zarr_tpl_exists', 'num_regrids_done', 'is_coarsen_complete'))
+    df['inputs_complete'] = df.expected_num_inputs == df.num_inputs
+    df['regrid_complete'] = df.num_inputs == df.num_regrids_done
+    df['deploy'] = ctx.obj['config'].deploy
+    df['output_vn'] = ctx.obj['config'].output_vn
+    if short:
+        df = df[['sim', 'deploy', 'output_vn', 'inputs_complete', 'zarr_tpl_exists', 'regrid_complete', 'is_coarsen_complete']]
+    print(df)
+    if interactive:
+        breakpoint()
 
 @cli.command()
 @click.argument('args', nargs=-1)
