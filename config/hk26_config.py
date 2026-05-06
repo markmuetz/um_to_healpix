@@ -270,8 +270,9 @@ group3d_ml = {
 # ./10km-GAL9-nest/glm/field.pp/apvera.pp/glm.n1280_GAL9_nest.apvera_20200120T00.pp
 global_sim_keys = {
     'glm.n2560_RAL3p3.tuned': '5km-RAL3p3-tuned',
-    'glm.n1280_CoMA9': '10km-CoMA9',
+    'glm.n2560_CoMA9_hier_v2': '5km-CoMA9',
     'glm.n1280_GAL9_v2': '10km-GAL9',
+    'glm.n1280_CoMA9': '10km-CoMA9',
 }
 
 # Handle differences between GAL9/CoMA9 precip
@@ -331,11 +332,11 @@ for key in global_sim_keys:
     else:
         group3d_ml_global_map[key] = group3d_ml
 
-# NOTE, THESE USE THE ORIGINAL DYMOND 3 DATA.
-# There is no included orog for the DYAMOND3_rerun.
 orig_base_dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
 orog_land_sea = {
+    # NOTE, THIS USES THE ORIGINAL DYMOND 3 DATA.
     'glm.n2560_RAL3p3.tuned': orig_base_dir / '5km-RAL3/glm/field.pp/apa.pp/glm.n2560_RAL3p3.apa_20200120T00.pp',
+    'glm.n2560_CoMA9_hier_v2': [dy3dir / 'orography/orography-n2560e.nc', dy3dir / 'landmask/mask-n2560e.nc'],
     'glm.n1280_CoMA9': [dy3dir / 'orography/orography-n1280e.nc', dy3dir / 'landmask/mask-n1280e.nc'],
     'glm.n1280_GAL9_v2': [dy3dir / 'orography/orography-n1280e.nc', dy3dir / 'landmask/mask-n1280e.nc'],
 }
