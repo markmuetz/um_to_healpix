@@ -318,7 +318,7 @@ group2d_global_map = {}
 for key in global_sim_keys:
     if key.endswith('GAL9_v2'):
         group2d_global_map[key] = group2d_GAL9_v2
-    elif key.endswith('CoMA9'):
+    elif 'CoMA9' in key:
         group2d_global_map[key] = group2d_CoMA9
     else:
         group2d_global_map[key] = group2d
@@ -327,7 +327,7 @@ group3d_ml_global_map = {}
 for key in global_sim_keys:
     if key.endswith('GAL9_v2'):
         group3d_ml_global_map[key] = group3d_ml_GAL9_v2
-    elif key.endswith('CoMA9'):
+    elif 'CoMA9' in key:
         group3d_ml_global_map[key] = group3d_ml_CoMA9
     else:
         group3d_ml_global_map[key] = group3d_ml
