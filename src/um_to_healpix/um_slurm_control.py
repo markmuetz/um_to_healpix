@@ -13,6 +13,7 @@ from itertools import batched, product
 from pathlib import Path
 
 import click
+import numpy as np
 import pandas as pd
 from loguru import logger
 
@@ -179,9 +180,10 @@ def cli_exit(ctx, result, **kwargs):
 @cli.command()
 @click.option('--endtime', '-E', type=pd.Timestamp, default=pd.Timestamp('2022-01-01 00:00'))
 @click.option('--mem', type=int, default=100000)
+@click.option('--dep-job-id', '-D', default=None)
 @click.argument('config_key')
 @click.pass_context
-def process(ctx, endtime, mem, config_key):
+def process(ctx, endtime, mem, dep_job_id, config_key):
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
 
     logger.debug(f'using {nconcurrent_tasks} concurrent tasks')
@@ -217,6 +219,7 @@ def process(ctx, endtime, mem, config_key):
                     'donepath': str(create_donepath), }
                 slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key,
                                                                 [create_task], f'createzarr', 'createzarr',
+                                                                depends_on=dep_job_id,
                                                                 nconcurrent_tasks=nconcurrent_tasks)
                 logger.debug(slurm_script_path)
                 create_donepath.parent.mkdir(parents=True, exist_ok=True)
@@ -314,10 +317,11 @@ def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
                 # The heart of this method is a ds.coarsen(cell=4).mean() call.
                 # This benefits massively from a dask speed up.
                 # Request lots of cores per task.
-                slurm_script_path = write_tasks_slurm_job_array(ctx.obj['config'].slurm_config, config_key, tasks,
-                    'coarsen', f'regrid_{dim}_{zoom}', comment=f'regrid:{dim},{zoom}', depends_on=prev_zoom_job_id, partition='standard',
+                slurm_script_path = write_tasks_slurm_job_array(
+                    ctx.obj['config'].slurm_config, config_key, tasks,
+                    'coarsen', f'regrid_{dim}_{zoom}', comment=f'{config_key}:coarsen:{dim},{zoom}',
+                    depends_on=prev_zoom_job_id, partition='standard',
                     nconcurrent_tasks=nconcurrent_tasks, mem=mem, qos='high',
-                    # cpus_per_task=48,  # maxes out at 6 tasks/288 cpus because of max cpus.
                     cpus_per_task=12,  # maxes out at 24 tasks/288 cpus because of max cpus.
                 )
 
@@ -482,9 +486,10 @@ def progress_monitor(ctx, short, expected_num_inputs, interactive, config_key):
         donereldir = Path(dummy_donepath).parent
         donepath_tpl = str(config['donedir'] / donereldir / 'coarsen/{dim}/z{zoom}/{job_id}.done')
         max_zoom = config['max_zoom']
-        is_coarsen_complete = True
 
         dims = ['2d', '3d']
+        ncoarsen_jobs = 0
+        ncoarsen_jobs_done = 0
         for dim, zoom in product(dims, range(max_zoom - 1, -1, -1)):
             if dim == '2d':
                 time_idx = ctx.obj['config'].time2d
@@ -495,21 +500,24 @@ def progress_monitor(ctx, short, expected_num_inputs, interactive, config_key):
             timechunk = chunks[zoom][0]
             logger.debug(f'timechunk: {timechunk}')
             njobs = int(math.ceil(len(time_idx) / timechunk))
+            ncoarsen_jobs += njobs
             job_idx = [i for i in range(njobs) if
-                       not Path(donepath_tpl.format(dim=dim, zoom=zoom, job_id=i)).exists()]
-            if job_idx:
-                is_coarsen_complete = False
-                break
+                       Path(donepath_tpl.format(dim=dim, zoom=zoom, job_id=i)).exists()]
+            ncoarsen_jobs_done += len(job_idx)
 
-        data.append((config_key, expected_num_inputs, len(dates_to_paths), create_donepath.exists(), sum(p.exists() for p in donepaths), is_coarsen_complete))
-    df = pd.DataFrame(data, columns=('sim', 'expected_num_inputs', 'num_inputs', 'zarr_tpl_exists', 'num_regrids_done', 'is_coarsen_complete'))
-    df['inputs_complete'] = df.expected_num_inputs == df.num_inputs
-    df['regrid_complete'] = df.num_inputs == df.num_regrids_done
+        data.append((config_key, expected_num_inputs, len(dates_to_paths), create_donepath.exists(),
+                     sum(p.exists() for p in donepaths), ncoarsen_jobs_done / ncoarsen_jobs * 100))
+    df = pd.DataFrame(data, columns=('sim', 'expected_num_inputs', 'num_inputs', 'zarr_tpl_exists', 'num_regrids_done',
+                                     'coarsen_complete'))
+    df['inputs_complete'] = df.num_inputs / df.expected_num_inputs * 100
+    df['regrid_complete'] = df.num_regrids_done / df.num_inputs * 100
     df['deploy'] = ctx.obj['config'].deploy
     df['output_vn'] = ctx.obj['config'].output_vn
+    df = df.replace([np.inf, -np.inf], 0)
     if short:
-        df = df[['sim', 'deploy', 'output_vn', 'inputs_complete', 'zarr_tpl_exists', 'regrid_complete', 'is_coarsen_complete']]
-    print(df)
+        df = df[['sim', 'deploy', 'output_vn', 'inputs_complete', 'zarr_tpl_exists', 'regrid_complete', 'coarsen_complete']]
+    # print(df)
+    print(df.sort_values(['regrid_complete', 'coarsen_complete'], ascending=False).to_markdown(index=False, floatfmt='.1f'))
     if interactive:
         breakpoint()
 
