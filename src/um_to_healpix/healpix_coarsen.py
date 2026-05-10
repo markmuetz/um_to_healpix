@@ -95,6 +95,8 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
     tgt_chunks = chunks[tgt_zoom]
 
     src_ds_time_slice = src_ds.isel(time=time_slice)
+    src_ds_time_slice = src_ds_time_slice.chunk({'time': -1, 'healpix_index': -1})
+
     if regional:
         if dim == '3d' and 'weights' in src_ds.data_vars.keys():
             logger.debug('drop weights')

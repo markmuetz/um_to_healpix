@@ -18,6 +18,7 @@ output_vn = 'v7'
 deploy = 'prod'
 # Location of input files.
 dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
+dy3dir_scratch = Path('/work/scratch-pw5/rwjones/kscale/DYAMOND3_reruns/')
 # hrcm GWS not available.
 # weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
 # donedir = Path(f'/gws/nopw/j04/hrcm/mmuetz/slurm_done/{deploy}')
@@ -383,14 +384,12 @@ global_configs['glm.n2560_RAL3p3.tuned']['metadata'].update({
 
 
 regional_sim_keys = {
-    'Africa_km4p4_RAL3P3.n1280_CoMA9': ('5km-CoMA9', 'Africa_km4p4_RAL3P3'),
-    # 'Africa_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
-    # 'SEA_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
-    # 'SAmer_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
-    # 'Africa_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
-    # 'SEA_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
-    # 'CTC_km4p4_RAL3P3.n1280_GAL9_nest': '10km-GAL9-nest',
-    # 'CTC_km4p4_CoMA9_TBv1.n1280_GAL9_nest': '10km-GAL9-nest',
+    'Africa_km4p4_RAL3P3.n1280_CoMA9': dict(nest='5km-CoMA9', physics='Africa_km4p4_RAL3P3', on_scratch=False),
+    'SAmer_km4p4_RAL3P3.n1280_CoMA9': dict(nest='5km-CoMA9', physics='SAmer_km4p4_RAL3P3', on_scratch=True),
+    'SEA_km4p4_RAL3P3.n1280_CoMA9': dict(nest='5km-CoMA9', physics='SEA_km4p4_RAL3P3', on_scratch=True),
+    'Africa_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='Africa_km4p4_CoMA9_TBv1', on_scratch=True),
+    'SAmer_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='SAmer_km4p4_CoMA9_TBv1', on_scratch=True),
+    'SEA_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='SEA_km4p4_CoMA9_TBv1', on_scratch=True),
 }
 
 group2d_regional = copy.deepcopy(group2d)
@@ -405,6 +404,13 @@ group2d_regional['chunks'] = chunks2dregional
 group3d_regional['chunks'] = chunks3dregional
 group3d_ml_regional['chunks'] = chunks3dregional
 
+def get_regional_basedir(nest, physics, on_scratch):
+    if on_scratch:
+        return dy3dir_scratch / f'{nest}' / f'{physics}'
+    else:
+        return dy3dir / f'{nest}' / f'{physics}'
+
+
 # /gws/nopw/j04/kscale/DYAMOND3_reruns/5km-CoMA9
 regional_configs = {
     key: {
@@ -415,7 +421,7 @@ regional_configs = {
         # equally spaced.
         # 'add_cyclic': key.startswith('CTC'),  # only difference from regional.
         'add_cyclic': False,
-        'basedir': dy3dir / f'{nestdir}' / f'{simdir}',
+        'basedir': get_regional_basedir(**sim_config),
         'weightsdir': weightsdir,
         'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
@@ -432,7 +438,7 @@ regional_configs = {
             'simulation': key,
         }
     }
-    for key, (nestdir, simdir) in regional_sim_keys.items()
+    for key, sim_config in regional_sim_keys.items()
 }
 
 processing_config = {
