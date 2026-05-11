@@ -362,9 +362,6 @@ def check_output_mapping(ctx, config_key, date, output_file, interactive):
             'extra_attrs', 'extra_processing']
     data = []
     for config_key in config_keys:
-        # TODO: can't load data for Africa or SEA CTC??
-        if 'Africa' in config_key or 'SEA' in config_key or 'CTC_km4p4_CoMA9' in config_key:
-            continue
         logger.info(f'check output mapping: {config_key}')
         config = ctx.obj['config'].processing_config[config_key]
         if date is None:
@@ -507,19 +504,20 @@ def progress_monitor(ctx, short, expected_num_inputs, interactive, config_key):
 
         data.append((config_key, expected_num_inputs, len(dates_to_paths), create_donepath.exists(),
                      sum(p.exists() for p in donepaths), ncoarsen_jobs_done / ncoarsen_jobs * 100))
-    df = pd.DataFrame(data, columns=('sim', 'expected_num_inputs', 'num_inputs', 'zarr_tpl_exists', 'num_regrids_done',
-                                     'coarsen_complete'))
-    df['inputs_complete'] = df.num_inputs / df.expected_num_inputs * 100
-    df['regrid_complete'] = df.num_regrids_done / df.num_inputs * 100
+    df = pd.DataFrame(data, columns=('sim', 'expected_num_inputs', 'num_inputs', 'zarr_tpl', 'num_regrids_done',
+                                     'coarsen'))
+    df['inputs'] = df.num_inputs / df.expected_num_inputs * 100
+    df['regrid'] = df.num_regrids_done / df.num_inputs * 100
     df['deploy'] = ctx.obj['config'].deploy
     df['output_vn'] = ctx.obj['config'].output_vn
     df = df.replace([np.inf, -np.inf], 0)
     if short:
-        df = df[['sim', 'deploy', 'output_vn', 'inputs_complete', 'zarr_tpl_exists', 'regrid_complete', 'coarsen_complete']]
+        df = df[['sim', 'inputs', 'zarr_tpl', 'regrid', 'coarsen']]
     # print(df)
-    print(df.sort_values(['regrid_complete', 'coarsen_complete'], ascending=False).to_markdown(index=False, floatfmt='.1f'))
+    print(df.sort_values(['regrid', 'coarsen', 'inputs'], ascending=False).to_markdown(index=False, floatfmt='.1f'))
     if interactive:
         breakpoint()
+
 
 @cli.command()
 @click.argument('args', nargs=-1)

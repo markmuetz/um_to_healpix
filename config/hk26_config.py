@@ -36,7 +36,7 @@ slurm_config = dict(
     qos='standard',
     time='10:00:00',
     mem=100000,
-    nconcurrent_tasks=40,
+    nconcurrent_tasks=60,
 )
 
 shared_metadata = {
@@ -396,6 +396,7 @@ group2d_regional = copy.deepcopy(group2d)
 group3d_regional = copy.deepcopy(group3d)
 group3d_ml_regional = copy.deepcopy(group3d_ml)
 # TODO: Check this shouldn't be there.
+# It is not present for all regional sims as far as I can tell.
 # 'm01s02i391'
 group2d_regional['name_map'].pop(('clwvi', 'atmosphere_mass_content_of_cloud_condensed_water'))
 
@@ -403,6 +404,16 @@ group2d_regional['name_map'].pop(('clwvi', 'atmosphere_mass_content_of_cloud_con
 group2d_regional['chunks'] = chunks2dregional
 group3d_regional['chunks'] = chunks3dregional
 group3d_ml_regional['chunks'] = chunks3dregional
+
+group3d_ml_regional_CoMA9 = copy.deepcopy(group3d_ml_regional)
+group3d_ml_regional_CoMA9['name_map'].pop(('qs', 'mass_fraction_of_snow_water_in_air'))
+
+group3d_ml_regional_map = {}
+for key in regional_sim_keys:
+    if 'CoMA9_TBv1' in key:
+        group3d_ml_regional_map[key] = group3d_ml_regional_CoMA9
+    else:
+        group3d_ml_regional_map[key] = group3d_ml_regional
 
 def get_regional_basedir(nest, physics, on_scratch):
     if on_scratch:
@@ -432,7 +443,7 @@ regional_configs = {
         'groups': {
             '2d': group2d_regional,
             '3d': group3d_regional,
-            '3d_ml': group3d_ml_regional,
+            '3d_ml': group3d_ml_regional_map[key],
         },
         'metadata': {
             'simulation': key,

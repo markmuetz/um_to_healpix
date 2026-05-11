@@ -44,8 +44,6 @@ async def async_da_to_zarr_with_retries(da, store, region, max_retries=5):
     success = False
     while retries < max_retries:
         try:
-            # If you see an error with writing model-to-pressure interpolated variables, look here:
-            # https://github.com/markmuetz/um_to_healpix/issues/17
             da.to_zarr(store, region=region)
             success = True
             logger.debug(f'{da.name} successfully written to zarr')
@@ -90,11 +88,6 @@ def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True):
         # Enfore greater than zero if so (these are all for mass_ fields - must by >= 0).
         new_cube_data[new_cube_data < 0] = 0
 
-    # See this bug: https://github.com/markmuetz/um_to_healpix/issues/17
-    # A very subtle bug occurs if you use cube.coord for any of these variables. Certain simulations
-    # e.g. Africa_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2 have very slightly different lat/lon coords, which forces
-    # healpix to use different number of active chunks, meaning that you will get a failure when you try to write, e.g.
-    # cli after it has been interpolated. Switching to z should help (thanks Claude).
     coords = [(cube.coord('time'), 0), (z.coord('pressure'), 1), (z.coord('latitude'), 2),
               (z.coord('longitude'), 3)]
     new_cube = iris.cube.Cube(new_cube_data,
