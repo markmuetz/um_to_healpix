@@ -226,6 +226,7 @@ class UMProcessTasks:
                 cubes = extractor.extract_cubes(map_item, group_cubes)
             except iris.exceptions.ConstraintMismatchError:
                 missing_map_items.append(map_item)
+                continue
 
             # Just use first cube here.
             da = xr.DataArray.from_iris(cubes[0]).rename(short_name)
