@@ -277,9 +277,13 @@ def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
     config = ctx.obj['config'].processing_config[config_key]
     jobids = []
-    donepath_tpl = str(config['donedir'] / config['coarsen_donepath_tpl'])
+    coarsen_donepath_tpl = str(config['donedir'] / config['coarsen_donepath_tpl'])
+    donedir = config['donedir']
+    regrid_donepath_tpl = config['donepath_tpl']
+    dates_to_paths = find_dyamond3_pp_dates_to_paths(config['basedir'])
+    regrid_exist_dates = set(date for date in dates_to_paths
+                             if (donedir / regrid_donepath_tpl.format(task='regrid', date=date)).exists())
     max_zoom = config['max_zoom']
-
     for dim in dims:
         prev_zoom_job_id = dep_job_id
         if dim == '2d':
@@ -290,6 +294,9 @@ def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
             raise Exception(f'unknown dim: {dim}')
         if endtime is not None:
             time_idx = time_idx[time_idx <= endtime]
+        # time_idx extends one step beyond the last input file; drop it so the
+        # final chunk is not permanently blocked by a timestamp with no PP data.
+        time_idx = time_idx[:-1]
 
         chunks = config['groups'][dim]['chunks']
 
@@ -299,9 +306,19 @@ def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
             timechunk = chunks[zoom][0]
             logger.debug(f'timechunk: {timechunk}')
             njobs = int(math.ceil(len(time_idx) / timechunk))
-            job_idx = [i for i in range(njobs) if not Path(donepath_tpl.format(dim=dim, zoom=zoom, job_id=i)).exists()]
+            # Checks whether coarsen has already been done AND whether all required regridding has been done.
+            # Means it handles missing regridded files, and coarsen can be run at any point and incrementally as more
+            # files are added.
+            # regrid_exists_dates has values at 00:00/12:00 (which reflects .pp stored at 00:00/12:00).
+            # Floor each hourly/3-hourly timestamp to its 12-hourly .pp file boundary
+            # before checking against regrid_exist_dates.
+            job_idx = [
+                i for i in range(njobs)
+                if not Path(coarsen_donepath_tpl.format(dim=dim, zoom=zoom, job_id=i)).exists()
+                and all(t.floor('12h') in regrid_exist_dates for t in time_idx[i * timechunk:(i + 1) * timechunk])
+            ]
             tgt_time_calcs = [{'start_idx': i * timechunk, 'end_idx': (i + 1) * timechunk,
-                'donepath': donepath_tpl.format(dim=dim, zoom=zoom, job_id=i), } for i in job_idx]
+                'donepath': coarsen_donepath_tpl.format(dim=dim, zoom=zoom, job_id=i), } for i in job_idx]
             for tgt_times in batched(tgt_time_calcs, nbatch):
                 tasks.append({'task_type': 'coarsen', 'config_path': ctx.obj['config_path'], 'config_key': config_key,
                     'tgt_zoom': zoom, 'dim': dim, 'tgt_times': tgt_times, })
@@ -316,7 +333,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
                 # Request lots of cores per task.
                 slurm_script_path = write_tasks_slurm_job_array(
                     ctx.obj['config'].slurm_config, config_key, tasks,
-                    'coarsen', f'regrid_{dim}_{zoom}', comment=f'{config_key}:coarsen:{dim},{zoom}',
+                    'coarsen', f'coarsen_{dim}_{zoom}', comment=f'{config_key}:coarsen:{dim},{zoom}',
                     depends_on=prev_zoom_job_id, partition='standard',
                     nconcurrent_tasks=nconcurrent_tasks, mem=mem, qos='high',
                     cpus_per_task=12,  # maxes out at 24 tasks/288 cpus because of max cpus.
