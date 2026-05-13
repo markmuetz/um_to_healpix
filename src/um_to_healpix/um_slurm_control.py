@@ -277,10 +277,7 @@ def coarsen(ctx, dims, nbatch, endtime, config_key, dep_job_id):
     nconcurrent_tasks = ctx.obj['nconcurrent_tasks']
     config = ctx.obj['config'].processing_config[config_key]
     jobids = []
-    dummy_donepath_tpl = config['donepath_tpl']
-    dummy_donepath = dummy_donepath_tpl.format(task='dummy', date='dummy')
-    donereldir = Path(dummy_donepath).parent
-    donepath_tpl = str(config['donedir'] / donereldir / 'coarsen/{dim}/z{zoom}/{job_id}.done')
+    donepath_tpl = str(config['donedir'] / config['coarsen_donepath_tpl'])
     max_zoom = config['max_zoom']
 
     for dim in dims:
@@ -478,10 +475,7 @@ def progress_monitor(ctx, short, expected_num_inputs, interactive, config_key):
         create_donepath = donedir / donepath_tpl.format(task='create_empty_zarr_store', date=config['first_date'])
         donepaths = [(donedir / donepath_tpl.format(task='regrid', date=date)) for date in dates_to_paths]
 
-        dummy_donepath_tpl = config['donepath_tpl']
-        dummy_donepath = dummy_donepath_tpl.format(task='dummy', date='dummy')
-        donereldir = Path(dummy_donepath).parent
-        donepath_tpl = str(config['donedir'] / donereldir / 'coarsen/{dim}/z{zoom}/{job_id}.done')
+        donepath_tpl = str(config['donedir'] / config['coarsen_donepath_tpl'])
         max_zoom = config['max_zoom']
 
         dims = ['2d', '3d']

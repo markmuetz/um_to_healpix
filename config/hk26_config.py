@@ -354,6 +354,7 @@ global_configs = {
         'orog_land_sea': orog_land_sea[key],
         'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
+        'coarsen_donepath_tpl': f'{key}/{output_vn}/coarsen/{{dim}}/z{{zoom}}/{{job_id}}.done',
         'first_date': pd.Timestamp(2020, 1, 20, 0),
         'max_zoom': 10 if key.startswith('glm.n2560') else 9,
         'zarr_store_url_tpl': f's3://sim-data/{deploy}/{output_vn}/{key}/um.{{freq}}.hp_z{{zoom}}.zarr',
@@ -390,6 +391,7 @@ regional_sim_keys = {
     'Africa_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='Africa_km4p4_CoMA9_TBv1', on_scratch=True),
     'SAmer_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='SAmer_km4p4_CoMA9_TBv1', on_scratch=True),
     'SEA_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='SEA_km4p4_CoMA9_TBv1', on_scratch=True),
+    'CTC_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='CTC_km4p4_CoMA9_TBv1', on_scratch=False),
 }
 
 group2d_regional = copy.deepcopy(group2d)
@@ -436,6 +438,7 @@ regional_configs = {
         'weightsdir': weightsdir,
         'donedir': donedir,
         'donepath_tpl': f'{key}/{output_vn}/{{task}}_{{date}}.done',
+        'coarsen_donepath_tpl': f'{key}/{output_vn}/coarsen/{{dim}}/z{{zoom}}/{{job_id}}.done',
         'max_zoom': 10,
         'first_date': pd.Timestamp(2020, 1, 20, 0),
         'zarr_store_url_tpl': f's3://sim-data/{deploy}/{output_vn}/{key}/um.{{freq}}.hp_z{{zoom}}.zarr',
