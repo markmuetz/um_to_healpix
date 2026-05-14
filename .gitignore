@@ -171,3 +171,4 @@ cython_debug/
 .pypirc
 
 /slurm
+output_tests/figures/

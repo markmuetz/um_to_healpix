@@ -55,3 +55,11 @@ Homepage = "https://github.com/markmuetz/um_to_healpix"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+filterwarnings = [
+    "ignore:The return type of `Dataset.dims` will be changed:FutureWarning",
+]
+markers = [
+    "plots: tests that produce plots for visual inspection (run with -m plots)",
+]

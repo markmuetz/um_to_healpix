@@ -27,7 +27,7 @@ def get_plot_kwargs(da):
 
 def plot_all_fields(ds_plot):
     """Plot all fields for a given dataset. Assumes that each field is 2D - i.e. sel(time=..., [pressure=...]) has been applied"""
-    zoom = int(np.log2(ds_plot.crs.attrs['healpix_nside']))
+    zoom = ds_plot.crs.attrs['refinement_level']
     projection = ccrs.Robinson(central_longitude=0)
     das = {}
     for name, da in ds_plot.data_vars.items():
@@ -52,7 +52,7 @@ def plot_all_fields(ds_plot):
         ax.set_title(f'time: {time} - {name}')
         ax.set_global()
         im = egh.healpix_show(da, ax=ax, **kwargs)
-        long_name = da.long_name
+        long_name = da.attrs.get('long_name', da.name)
 
         plt.colorbar(im, label=f'{long_name} ({da.attrs.get("units", "-")})')
         ax.coastlines()
@@ -97,7 +97,7 @@ def plot_zonal_mean(das, bins=np.linspace(-90, 90, 1801)):
 
     plt.figure(layout='constrained')
     for da in das:
-        zoom = int(np.log2(da.crs.attrs['healpix_nside']))
+        zoom = da.crs.attrs['refinement_level']
         zonal_mean_da = da.mean(dim='time').groupby_bins('lat', bins).mean()
         plt.plot(bin_mids, zonal_mean_da, label=f'z{zoom}')
 
