@@ -136,7 +136,7 @@ def _compute_coarsened(src_ds_time_slice, tgt_store, tgt_zoom, dim, chunks, regi
             tgt_ds['weights'] = tgt_weights
             logger.debug(float(np.isnan(tgt_ds.weights).sum().values))
 
-    tgt_ds = tgt_ds.drop_vars('crs')
+    tgt_ds = tgt_ds.drop_vars('crs', errors='ignore')
     return tgt_ds
 
 

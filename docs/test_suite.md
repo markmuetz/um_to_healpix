@@ -46,6 +46,12 @@ These tests are run manually after a processing run completes, not in CI.
 
 ## New test suite
 
+### Dependencies / known version constraints
+
+- **easygems 0.0.14** is required (pinned in `pyproject.toml`). Versions 0.1.x introduced
+  a stereographic transform in `compute_weights_delaunay` that produces NaN for exact ±90°
+  latitudes, causing `scipy.spatial.Delaunay` to crash with "Points cannot contain NaN".
+
 ### Framework
 
 **pytest** — stays as-is. No additional libraries needed:

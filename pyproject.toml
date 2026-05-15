@@ -31,7 +31,7 @@ dependencies = [
     "cartopy",
     "click",
     "dask",
-    "easygems",
+    "easygems==0.0.14",  # 0.1.x introduces a pole singularity in compute_weights_delaunay
     "healpix",
     # There is a problem with iris being installed twice on `pip install -e .`
     # Shifting to scitools-iris should fix this.
