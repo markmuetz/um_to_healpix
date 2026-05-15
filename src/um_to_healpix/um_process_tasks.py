@@ -38,19 +38,24 @@ from .healpix_coarsen import coarsen_healpix_zarr_region
 from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited_healpix
 from .util import async_da_to_zarr_with_retries, load_config, exception_info
 
-# Super simple .s3cfg parser - must be in home directory.
-s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
 iris.FUTURE.date_microseconds = True
 
 
 def get_jasmin_s3():
     """These objects seem to go stale after a period of time - recreate when needed"""
+    # Super simple .s3cfg parser - must be in home directory.
+    s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
     return s3fs.S3FileSystem(
         anon=False,
         secret=s3cfg['secret_key'],
         key=s3cfg['access_key'],
         client_kwargs={'endpoint_url': 'http://hackathon-o.s3.jc.rl.ac.uk'}
     )
+
+
+def _default_store_factory(url):
+    """Create a JASMIN S3 zarr store from a URL string."""
+    return s3fs.S3Map(root=url, s3=get_jasmin_s3(), check=False)
 
 
 def get_crs(zoom):
@@ -94,7 +99,7 @@ def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, ad
     return da_hp
 
 
-def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=False):
+def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=False, store=None):
     """Write a healpix DataArray to the store defined by the URL."""
     name = da.name
     logger.info(f'{name} to zarr => {url}')
@@ -137,11 +142,10 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
         if not regional and np.isnan(da.values).any():
             logger.warning(f'da {da.name} contains NaNs')
 
-    zarr_store = s3fs.S3Map(
-        root=url,
-        s3=get_jasmin_s3(), check=False)
+    if store is None:
+        store = _default_store_factory(url)
     # Handle errors if they arise (started happening on 26/4/25).
-    asyncio.run(async_da_to_zarr_with_retries(da, zarr_store, region))
+    asyncio.run(async_da_to_zarr_with_retries(da, store, region))
     return name
 
 
@@ -177,11 +181,12 @@ def get_regional_bounds(da):
 
 
 class UMProcessTasks:
-    def __init__(self, config, shared_metadata):
+    def __init__(self, config, shared_metadata, store_factory=None):
         self.config = config
         self.shared_metadata = shared_metadata
         self.drop_vars = config['drop_vars']
         self.groups = config['groups']
+        self._store_factory = store_factory if store_factory is not None else _default_store_factory
 
         self.debug_log = StringIO()
         logger.add(self.debug_log)
@@ -427,9 +432,7 @@ class UMProcessTasks:
         logger.info(f'Saving {task["config_key"]} zoom={zoom}')
         store_url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
 
-        zarr_store = s3fs.S3Map(
-            root=store_url,
-            s3=get_jasmin_s3(), check=False)
+        zarr_store = self._store_factory(store_url)
         logger.debug(store_url)
         logger.debug(ds_tpl)
         # For quick tests.
@@ -439,7 +442,7 @@ class UMProcessTasks:
         # Writing it after the fact is quick.
         zarr.consolidate_metadata(zarr_store)
 
-    def regrid(self, task):
+    def regrid(self, task, cubes=None):
         """Regrid all variables from lat/lon to healpix.
 
         Reads in data from UM .pp files, and outputs to the correct region of an already created zarr store.
@@ -456,12 +459,17 @@ class UMProcessTasks:
            * extract each variable and map names, attrs. Apply extra processing if nec.
            * do the regridding
            * save to zarr store
+
+        Parameters:
+            task: task dict with 'inpaths' key (ignored when cubes is provided)
+            cubes: optional pre-loaded iris CubeList; if None, loaded from task['inpaths']
         """
         inpaths = task['inpaths']
 
         logger.info('loading cubes')
         logger.trace(inpaths)
-        cubes = iris.load(inpaths)
+        if cubes is None:
+            cubes = iris.load(inpaths)
 
         add_cyclic = self.config.get('add_cyclic', True)
         regional = self.config.get('regional', False)
@@ -504,7 +512,8 @@ class UMProcessTasks:
                 # Write this variable to the zarr store.
                 zarr_store_name = group['zarr_store']
                 url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
-                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True)
+                store = self._store_factory(url)
+                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True, store=store)
 
     def coarsen_healpix_region(self, task):
         """Coarsen the regions from source to target zooms, as defined by the task."""
@@ -522,10 +531,8 @@ class UMProcessTasks:
             z: rel_url_tpl.format(freq=freq, zoom=z)
             for z in range(11)
         }
-        jasmin_s3 = get_jasmin_s3()
-
-        src_store = s3fs.S3Map(root=urls[src_zoom], s3=jasmin_s3, check=False)
-        tgt_store = s3fs.S3Map(root=urls[tgt_zoom], s3=jasmin_s3, check=False)
+        src_store = self._store_factory(urls[src_zoom])
+        tgt_store = self._store_factory(urls[tgt_zoom])
 
         chunks = self.config['groups'][dim]['chunks']
         zarr_chunks = {'time': chunks[tgt_zoom][0], 'healpix_index': -1}
