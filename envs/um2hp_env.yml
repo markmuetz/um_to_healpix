@@ -35,7 +35,5 @@ dependencies:
   - xesmf
   - xgcm
   - zarr
-# Do these have to be installed using pip?
-  - pip:
-    - easygems
+  - easygems=0.0.14  # 0.1.x breaks compute_weights_delaunay for exact ±90° latitudes
 

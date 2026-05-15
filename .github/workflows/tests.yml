@@ -1,0 +1,32 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - impl_test_suite
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up conda environment
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          environment-file: envs/um2hp_env.yml
+          activate-environment: um2hp_env
+          miniforge-variant: Mambaforge
+          use-mamba: true
+          cache-environment: true
+          cache-downloads: true
+
+      - name: Install package
+        run: pip install -e ".[test]"
+
+      - name: Run tests
+        run: pytest tests/ -v
