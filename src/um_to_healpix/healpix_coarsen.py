@@ -95,7 +95,8 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
     tgt_chunks = chunks[tgt_zoom]
 
     src_ds_time_slice = src_ds.isel(time=time_slice)
-    src_ds_time_slice = src_ds_time_slice.chunk({'time': -1, 'healpix_index': -1})
+    # Added to get rid of large task graph warning following Claude's advice. Didn't work.
+    # src_ds_time_slice = src_ds_time_slice.chunk({'time': -1, 'healpix_index': -1})
 
     if regional:
         if dim == '3d' and 'weights' in src_ds.data_vars.keys():
@@ -145,23 +146,22 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
         if da.name in ['orog', 'sftlf']:
             continue
         logger.debug(f'  writing {da.name}')
+        # Removed da.chunk({'healpix_index': preferred_chunks['healpix_index']}) in each call to
+        # async_da_to_zarr_with_retries following Claude's advice in order to remove warning about large task graph.
         if da.name == 'weights':
             if src_ds_time_slice.time[0] == src_ds.time[0]:
                 if dim == '2d':
                     wregion = {'healpix_index': slice(None)}
                     asyncio.run(
-                        async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, wregion))
+                        async_da_to_zarr_with_retries(da, tgt_store, wregion))
                 elif dim == '3d':
                     # TODO: still causes error due to dims mismatch.
                     logger.warning('Not writing weights for 3D data')
-                    # region = {'pressure': slice(None), 'healpix_index': slice(None)}
-                    # asyncio.run(
-                    #     async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))
             continue
         if da.name == 'mrsol':
             dregion = {'time': time_slice, 'depth': slice(None), 'healpix_index': slice(None)}
             asyncio.run(
-                async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, dregion))
+                async_da_to_zarr_with_retries(da, tgt_store, dregion))
         else:
             asyncio.run(
-                async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))
+                async_da_to_zarr_with_retries(da, tgt_store, region))
