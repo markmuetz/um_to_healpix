@@ -15,6 +15,7 @@ dependencies:
   - esmpy
   - healpy
   - intake
+  - joblib
   - ipdb
   - ipython
   - iris
