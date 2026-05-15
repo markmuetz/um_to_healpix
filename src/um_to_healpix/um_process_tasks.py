@@ -362,7 +362,7 @@ class UMProcessTasks:
         da_tpl.attrs['grid_mapping'] = 'crs'
         return da_tpl
 
-    def create_empty_zarr_stores(self, task):
+    def create_empty_zarr_stores(self, task, cubes=None):
         """Use information in metadata to create empty zarr stores that contains all variables
 
         One zarr store per zoom, each contains all variables and their metadata/dimensions.
@@ -371,9 +371,14 @@ class UMProcessTasks:
 
         `self._create_dataarray_template` creates the dummy variables
         `self._write_zarr_store` writes the datasets to the storage backend.
+
+        Parameters:
+            task: task dict with 'inpaths' key (ignored when cubes is provided)
+            cubes: optional pre-loaded iris CubeList; if None, loaded from task['inpaths']
         """
         inpaths = task['inpaths']
-        cubes = iris.load(inpaths)
+        if cubes is None:
+            cubes = iris.load(inpaths)
         logger.trace(cubes)
 
         regional = self.config.get('regional', False)
@@ -474,9 +479,12 @@ class UMProcessTasks:
         add_cyclic = self.config.get('add_cyclic', True)
         regional = self.config.get('regional', False)
 
-        # These are needed by any field which needs 3D interp.
-        p = cubes.extract_cube('air_pressure')
-        z = cubes.extract_cube('geopotential_height')
+        # Only needed for model-level → pressure interpolation; absent in 2D-only configs.
+        try:
+            p = cubes.extract_cube('air_pressure')
+            z = cubes.extract_cube('geopotential_height')
+        except iris.exceptions.ConstraintMismatchError:
+            p = z = None
         extractor = DataArrayExtractor(p, z)
 
         for group_name, group in self.groups.items():
