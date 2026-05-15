@@ -55,3 +55,14 @@ Homepage = "https://github.com/markmuetz/um_to_healpix"
 
 [tool.setuptools.packages.find]
 where = ["src"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["src"]
+markers = [
+    "slow: marks tests as slow (weight generation, zarr writes)",
+    "e2e: end-to-end tests requiring synthetic pipeline setup",
+]
+
+[project.optional-dependencies]
+test = ["pytest"]
