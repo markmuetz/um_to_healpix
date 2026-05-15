@@ -20,10 +20,8 @@ jobs:
         with:
           environment-file: envs/um2hp_env.yml
           activate-environment: um2hp_env
-          miniforge-variant: Mambaforge
+          miniforge-variant: Miniforge3
           use-mamba: true
-          cache-environment: true
-          cache-downloads: true
 
       - name: Install package
         run: pip install -e ".[test]"
