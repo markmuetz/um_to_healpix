@@ -44,6 +44,7 @@ dependencies = [
     "stratify",
     "xarray",
     "remake",
+    "coverage>=7.14.0",
 ]
 
 [project.scripts]
@@ -66,4 +67,11 @@ markers = [
 ]
 
 [project.optional-dependencies]
-test = ["pytest"]
+test = ["pytest", "pytest-cov"]
+
+[tool.coverage.run]
+source = ["um_to_healpix"]
+omit = ["*/plotting/*"]
+
+[tool.coverage.report]
+show_missing = true
