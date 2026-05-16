@@ -391,7 +391,7 @@ regional_sim_keys = {
     'Africa_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='Africa_km4p4_CoMA9_TBv1', on_scratch=True),
     'SAmer_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='SAmer_km4p4_CoMA9_TBv1', on_scratch=True),
     'SEA_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='SEA_km4p4_CoMA9_TBv1', on_scratch=True),
-    'CTC_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='CTC_km4p4_CoMA9_TBv1', on_scratch=False),
+    'CTC_km4p4_CoMA9_TBv1.n2560_CoMA9_hier_v2': dict(nest='5km-CoMA9', physics='CTC_km4p4_CoMA9_TBv1', on_scratch=True),
 }
 
 group2d_regional = copy.deepcopy(group2d)
