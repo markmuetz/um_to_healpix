@@ -46,7 +46,7 @@ class TestMapItem:
 class TestMultiMapItem:
     def test_repr_contains_class_name(self):
         item = MultiMapItem([MapItem('a'), MapItem('b')], ops=[operator.add])
-        assert 'MutliMapItem' in repr(item)  # preserves existing typo
+        assert 'MultiMapItem' in repr(item)
 
     def test_extra_attrs_defaults_to_empty_dict(self):
         item = MultiMapItem([MapItem('a')], ops=[])

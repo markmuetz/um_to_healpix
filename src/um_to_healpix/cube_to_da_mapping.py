@@ -65,7 +65,7 @@ class MultiMapItem:
         self.units = units
 
     def __repr__(self):
-        return 'MutliMapItem(' + str(self.items) + ', ' + str(self.ops) + ')'
+        return 'MultiMapItem(' + str(self.items) + ', ' + str(self.ops) + ')'
 
 
 
