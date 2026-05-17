@@ -45,6 +45,9 @@ dependencies = [
     "xarray",
     "remake",
     "coverage>=7.14.0",
+    "pytest>=9.0.3",
+    "zarr>=3.2.1",
+    "distributed>=2026.3.0",
 ]
 
 [project.scripts]
