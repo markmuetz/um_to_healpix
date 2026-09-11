@@ -27,7 +27,8 @@ REPO = Path(__file__).resolve().parent.parent
 RULES = ['create_stores', 'regrid'] + [f'coarsen_{d}_z{z}' for d in ('2d', '3d') for z in range(9, -1, -1)]
 FAIL_STATES = {'FAILED', 'OUT_OF_MEMORY', 'TIMEOUT', 'NODE_FAIL', 'CANCELLED', 'BOOT_FAIL', 'DEADLINE', 'PREEMPTED'}
 # Slow threshold: max(floor minutes, factor x median completed elapsed).
-SLOW = {'create_stores': (90, 3), 'regrid': (100, 2)}
+# Regrid tasks packed onto busy nodes routinely take 2-3x the median (seen: 101+ min vs 46 min median).
+SLOW = {'create_stores': (90, 3), 'regrid': (150, 3)}
 SLOW_DEFAULT = (45, 3)
 
 
@@ -87,6 +88,7 @@ def main():
 
     seen = set()
     done_jobs = set()
+    first_pass = True  # arrays already finished when the watcher starts are marked done without notifying
     last_heartbeat = time.time()
     event(f'watching rules {RULES[0]}..{RULES[-1]} for job ids >= {args.since}')
     while True:
@@ -123,6 +125,10 @@ def main():
                     event(f'SLOW {rule}[{i}] running {elapsed:.0f} min on {node} '
                           f'(median completed {median} min, threshold {threshold:.0f}; job {jid}_{i})')
 
+            if not queued and first_pass:
+                done_jobs.add(jid)
+                event(f'already finished at start: {rule} (job {jid}), {len(ok_times)}/{total} completed')
+                continue
             if not queued:
                 done_jobs.add(jid)
                 median = f', median {statistics.median(ok_times):.0f} min' if ok_times else ''
@@ -135,6 +141,7 @@ def main():
                 running = sum(q[0] == 'RUNNING' for q in queued.values())
                 progress.append(f'{rule} {len(ok_times)}/{total} done, {running} running, {len(failed)} failed')
 
+        first_pass = False
         if progress and time.time() - last_heartbeat > args.heartbeat * 60:
             event('PROGRESS ' + '; '.join(progress))
             last_heartbeat = time.time()
