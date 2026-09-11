@@ -113,7 +113,7 @@ def main():
     parser.add_argument('--topic', default='hk26-jasmin-updates')
     parser.add_argument('--interval', type=int, default=60, help='seconds between polls')
     parser.add_argument('--heartbeat', type=int, default=30, help='minutes between PROGRESS lines')
-    parser.add_argument('--stall', type=int, default=45, help='minutes of no log output before STALLED')
+    parser.add_argument('--stall', type=int, default=75, help='minutes of no log output before STALLED')
     args = parser.parse_args()
 
     seen = set()
