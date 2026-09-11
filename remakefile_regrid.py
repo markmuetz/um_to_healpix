@@ -5,13 +5,20 @@ Run when .pp files are available (from the repo root, in the pixi env):
 
 Can be rerun as more .pp files land — remake3 skips completed tasks.
 
-The processing config is deliberately *not* tracked for reruns (its repr embeds memory addresses,
-and config edits should not silently rerun everything) - it is loaded inside each rule.
-Only the output location (deploy/output_vn) is tracked. Rerun after config edits with --force -Q.
+The processing config is deliberately *not* tracked for reruns (its repr embeds memory addresses) -
+it is loaded inside each rule. Only the output location (deploy/output_vn) is tracked.
+Rerun after config edits with --force -Q.
+
+Input discovery: the regrid matrix scans each sim's input dir at plan time and writes an index
+(config.pp_indexdir/<config_key>.json). SLURM array elements rebuild their task's inputs from that
+index instead of rescanning the (GWS) input dirs.
+
+Per-task logs are also written (appended) to config.logdir/<config_key>/.
 """
-from functools import cache
+import json
 from pathlib import Path
 
+import pandas as pd
 from remake import Remake, rule
 
 from um_to_healpix.um_process_tasks import UMProcessTasks
@@ -33,14 +40,46 @@ rmk = Remake(config={
         'mem': '100G',
         # Keys are passed verbatim to #SBATCH --<key>=<value>.
         'export': 'ALL,OMP_NUM_THREADS=1',
+        # Bad nodes, from the (untracked) config; empty -> no --exclude line.
+        'exclude': config_module.slurm_config.get('exclude', ''),
     },
 })
 
+# config_key -> {pd.Timestamp: [paths]}, filled by a scan (plan time) or from the index (array elements).
+_DATES_TO_PATHS = {}
+# config_keys scanned in this process (so a process that plans more than once scans only once).
+_SCANNED = set()
 
-@cache
-def _dates_to_paths(config_key):
+
+def _index_path(config_key):
+    return config_module.pp_indexdir / f'{config_key}.json'
+
+
+def _scan_dates_to_paths(config_key):
+    """Scan the input dir for this config_key and (re)write its index. Plan time only."""
     cfg = PROCESSING_CONFIG[config_key]
-    return find_dyamond3_pp_dates_to_paths(cfg['basedir'], cfg.get('pp_glob', DEFAULT_PP_GLOB))
+    dates_to_paths = find_dyamond3_pp_dates_to_paths(cfg['basedir'], cfg.get('pp_glob', DEFAULT_PP_GLOB))
+    index_path = _index_path(config_key)
+    index_path.parent.mkdir(parents=True, exist_ok=True)
+    index = {str(date): [str(p) for p in paths] for date, paths in sorted(dates_to_paths.items())}
+    tmp_path = index_path.with_suffix(f'.{config_key}.tmp')
+    tmp_path.write_text(json.dumps(index, indent=1))
+    tmp_path.replace(index_path)
+    _DATES_TO_PATHS[config_key] = dates_to_paths
+    _SCANNED.add(config_key)
+    return dates_to_paths
+
+
+def _dates_to_paths(config_key):
+    """This process's view of the inputs: scanned this process, else the plan-time index, else a scan."""
+    if config_key not in _DATES_TO_PATHS:
+        index_path = _index_path(config_key)
+        if index_path.exists():
+            index = json.loads(index_path.read_text())
+            _DATES_TO_PATHS[config_key] = {pd.Timestamp(d): [Path(p) for p in paths] for d, paths in index.items()}
+        else:
+            _scan_dates_to_paths(config_key)
+    return _DATES_TO_PATHS[config_key]
 
 
 def _inpaths_dict(paths):
@@ -64,7 +103,8 @@ def create_inputs(config_key):
     config={'slurm': {'mem': '100G', 'time': '24:00:00'}},
 )
 def create_stores(inputs, config_key):
-    from um_to_healpix.util import load_config
+    """Create empty zarr stores for all zooms. Refuses to overwrite existing stores (would delete data)."""
+    from um_to_healpix.util import load_config, task_log
     config = load_config(CONFIG_PATH)
     task = {
         'task_type': 'create_empty_zarr_stores',
@@ -72,22 +112,23 @@ def create_stores(inputs, config_key):
         'config_key': config_key,
         'inpaths': list(inputs.values()),
     }
-    proc = UMProcessTasks(config.processing_config[config_key], config.shared_metadata)
-    proc.create_empty_zarr_stores(task)
+    with task_log(config.logdir / config_key / 'create_stores.log'):
+        proc = UMProcessTasks(config.processing_config[config_key], config.shared_metadata)
+        proc.create_empty_zarr_stores(task)
 
 
 def regrid_matrix():
-    """Scan input directories, return (config_key, date) pairs for available .pp files."""
+    """Scan input directories (writing the index), return (config_key, date) pairs for available .pp files."""
     rows = []
     for config_key in CONFIG_KEYS:
-        for date in sorted(_dates_to_paths(config_key)):
+        dates_to_paths = _DATES_TO_PATHS[config_key] if config_key in _SCANNED else _scan_dates_to_paths(config_key)
+        for date in sorted(dates_to_paths):
             rows.append({'config_key': config_key, 'date': str(date)})
     return rows
 
 
 def regrid_inputs(config_key, date):
     """Return .pp file paths for this (config_key, date)."""
-    import pandas as pd
     return _inpaths_dict(_dates_to_paths(config_key)[pd.Timestamp(date)])
 
 
@@ -101,7 +142,8 @@ def regrid_inputs(config_key, date):
                       'array_throttle': 40}},
 )
 def regrid(inputs, config_key, date):
-    from um_to_healpix.util import load_config
+    import pandas as pd
+    from um_to_healpix.util import load_config, task_log
     config = load_config(CONFIG_PATH)
     task = {
         'task_type': 'regrid',
@@ -110,8 +152,10 @@ def regrid(inputs, config_key, date):
         'date': date,
         'inpaths': list(inputs.values()),
     }
-    proc = UMProcessTasks(config.processing_config[config_key], config.shared_metadata)
-    proc.regrid(task)
+    log_name = f'{pd.Timestamp(date):%Y%m%dT%H}.log'
+    with task_log(config.logdir / config_key / 'regrid' / log_name):
+        proc = UMProcessTasks(config.processing_config[config_key], config.shared_metadata)
+        proc.regrid(task)
 
 
 rmk.rules_from_current_module()

@@ -4,6 +4,7 @@ from functools import partial
 import asyncio
 import random
 import subprocess as sp
+from contextlib import contextmanager
 from pathlib import Path
 
 import botocore.exceptions
@@ -34,6 +35,18 @@ import stratify
 #             logger.warning(f'sleeping for {timeout} s')
 #             await asyncio.sleep(timeout)
 #     raise Exception(f'failed to open {url} after {retries} retries')
+
+
+@contextmanager
+def task_log(path, level='DEBUG'):
+    """Also write loguru output to a human-readable per-task log file (appended to, one file per task)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sink_id = logger.add(path, level=level, mode='a')
+    try:
+        yield path
+    finally:
+        logger.remove(sink_id)
 
 
 async def async_da_to_zarr_with_retries(da, store, region, max_retries=5):

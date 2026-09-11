@@ -365,7 +365,22 @@ class UMProcessTasks:
         da_tpl.attrs['grid_mapping'] = 'crs'
         return da_tpl
 
-    def create_empty_zarr_stores(self, task, cubes=None):
+    def _existing_store_urls(self):
+        """URLs of this config's zarr stores (all zooms) that already exist."""
+        existing = []
+        for zoom in range(self.config['max_zoom'], -1, -1):
+            for zarr_store_name in sorted({g['zarr_store'] for g in self.config['groups'].values()}):
+                url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
+                store = self._store_factory(url)
+                if isinstance(store, (str, Path)):
+                    exists = (Path(store) / '.zmetadata').exists()
+                else:
+                    exists = '.zmetadata' in store
+                if exists:
+                    existing.append(url)
+        return existing
+
+    def create_empty_zarr_stores(self, task, cubes=None, overwrite=False):
         """Use information in metadata to create empty zarr stores that contains all variables
 
         One zarr store per zoom, each contains all variables and their metadata/dimensions.
@@ -378,7 +393,17 @@ class UMProcessTasks:
         Parameters:
             task: task dict with 'inpaths' key (ignored when cubes is provided)
             cubes: optional pre-loaded iris CubeList; if None, loaded from task['inpaths']
+            overwrite: if False (default), refuse to run if any of the stores already exist. Recreating a store
+                (mode='w') deletes all data already written to it.
         """
+        if not overwrite:
+            existing = self._existing_store_urls()
+            if existing:
+                raise FileExistsError(
+                    'Refusing to recreate existing zarr stores (this would delete all data written to them): '
+                    + ', '.join(existing) + '. Delete them first to recreate, or, if they are correct, mark this '
+                    'task as succeeded (e.g. `remake set-state <remakefile> -Q ... --success`).')
+
         inpaths = task['inpaths']
         if cubes is None:
             cubes = iris.load(inpaths)
@@ -431,6 +456,7 @@ class UMProcessTasks:
 
             for zarr_store_name, ds_tpl in ds_tpls.items():
                 self._write_zarr_store(ds_tpl, zarr_store_name, zoom, metadata, task)
+            logger.info(f'Completed: {self.config["max_zoom"] - zoom + 1}/{self.config["max_zoom"] + 1} (zoom {zoom})')
 
     def _write_zarr_store(self, ds_tpl, zarr_store_name, zoom, metadata, task):
         """Write a zarr store for the dataset template"""
@@ -490,6 +516,10 @@ class UMProcessTasks:
             p = z = None
         extractor = DataArrayExtractor(p, z)
 
+        # Progress: one line per variable written, counted across all groups.
+        nvars = sum(len(group['name_map']) for group in self.groups.values())
+        nwritten = 0
+
         for group_name, group in self.groups.items():
             logger.info(f'processing group {group_name}')
             group_constraint = group['constraint']
@@ -525,6 +555,8 @@ class UMProcessTasks:
                 url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
                 store = self._store_factory(url)
                 healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True, store=store)
+                nwritten += 1
+                logger.info(f'Completed: {nwritten}/{nvars} ({group_name}: {short_name})')
 
     def coarsen_healpix_region(self, task):
         """Coarsen the regions from source to target zooms, as defined by the task."""
@@ -561,7 +593,7 @@ class UMProcessTasks:
         logger.debug(cluster)
         logger.debug(client)
 
-        for subtask in task['tgt_times']:
+        for isubtask, subtask in enumerate(task['tgt_times']):
             subtask_log = StringIO()
             logger_id = logger.add(subtask_log)
 
@@ -571,6 +603,7 @@ class UMProcessTasks:
 
             coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end_idx, chunks, regional)
             logger.trace(f'completed subtask {subtask}')
+            logger.info(f'Completed: {isubtask + 1}/{len(task["tgt_times"])} (time idx {start_idx}:{end_idx})')
             # donepath is only used by um_slurm_control; remake tracks completion itself.
             if 'donepath' in subtask:
                 donepath = Path(subtask['donepath'])

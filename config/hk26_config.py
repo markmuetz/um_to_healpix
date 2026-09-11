@@ -26,6 +26,10 @@ dy3dir_scratch = Path('/work/scratch-pw5/rwjones/kscale/DYAMOND3_reruns/')
 weightsdir = Path('/work/scratch-nopw2/mmuetz/weightsdir')
 # Location of donefiles. Delete to rerun a particular task.
 donedir = Path(f'/work/scratch-nopw2/mmuetz/donedir/{deploy}')
+# remake pipelines: human-readable per-task logs, and the .pp file index written at plan time
+# (read by SLURM array elements instead of rescanning the input dirs). On scratch, not home (quota).
+logdir = Path(f'/work/scratch-nopw2/mmuetz/um2hp/logs/{deploy}/{output_vn}')
+pp_indexdir = Path('/work/scratch-nopw2/mmuetz/um2hp/pp_index')
 
 # Defaults - can be overridden.
 slurm_config = dict(
@@ -37,6 +41,9 @@ slurm_config = dict(
     time='10:00:00',
     mem=100000,
     nconcurrent_tasks=60,
+    # Nodes to avoid (remake pipelines: passed as #SBATCH --exclude). Comma-separated, '' for none.
+    # host1114: regrid ran ~5x slower than other nodes (2026-09-11).
+    exclude='host1114',
 )
 
 shared_metadata = {

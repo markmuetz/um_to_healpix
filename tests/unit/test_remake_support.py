@@ -2,6 +2,7 @@
 from unittest.mock import MagicMock
 
 import pandas as pd
+import pytest
 
 from um_to_healpix import um_process_tasks
 from um_to_healpix.um_process_tasks import UMProcessTasks
@@ -68,3 +69,38 @@ class TestCoarsenHealpixRegionDonepath:
         coarsen = self._run(monkeypatch, [{'start_idx': 0, 'end_idx': 1, 'donepath': str(donepath)}])
         assert coarsen.call_count == 1
         assert donepath.exists()
+
+
+class TestCreateStoresGuard:
+    def _proc(self, tmp_path):
+        config = {
+            'drop_vars': [],
+            'max_zoom': 1,
+            'groups': {'2d': {'zarr_store': 'PT1H'}, '3d': {'zarr_store': 'PT3H'}},
+            'zarr_store_url_tpl': str(tmp_path / 'um.{freq}.hp_z{zoom}.zarr'),
+        }
+        return UMProcessTasks(config, {}, store_factory=lambda url: url)
+
+    def test_no_existing_stores(self, tmp_path):
+        assert self._proc(tmp_path)._existing_store_urls() == []
+
+    def test_refuses_to_overwrite_existing_store(self, tmp_path):
+        store = tmp_path / 'um.PT3H.hp_z0.zarr'
+        store.mkdir()
+        (store / '.zmetadata').write_text('{}')
+        proc = self._proc(tmp_path)
+        assert proc._existing_store_urls() == [str(store)]
+        with pytest.raises(FileExistsError, match='Refusing to recreate'):
+            proc.create_empty_zarr_stores({'inpaths': []})
+
+
+def test_task_log_writes_and_detaches(tmp_path):
+    from loguru import logger
+    from um_to_healpix.util import task_log
+
+    path = tmp_path / 'logs' / 'task.log'
+    with task_log(path):
+        logger.info('inside')
+    logger.info('outside')
+    text = path.read_text()
+    assert 'inside' in text and 'outside' not in text
