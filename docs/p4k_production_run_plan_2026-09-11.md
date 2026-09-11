@@ -51,7 +51,7 @@ All from the repo root on the login node. `P=~/.pixi/bin/pixi`.
    Check the store URL in a task's log after step 3 starts: `s3://sim-data/prod/v7/glm.n2560_RAL3p3_tuned_p4k/`.
 3. **Submit regrid**: `$P run remake run -E slurm remakefile_regrid.py` → create_stores job + regrid array
    (afterok). Array job id: `.remake/jobs/regrid.jobids.json`.
-4. **Submit the coarsen trigger** (unattended; plans + submits coarsen when the regrid array has finished):
+4. **Coarsen: submitted manually** once regrid is complete (decision 2026-09-11 22:08: the trigger job 51462412 was cancelled). `$P run remake run -E slurm remakefile_coarsen.py`. The trigger option, for reference:
    ```bash
    sbatch --dependency=afterany:<regrid array id> scripts/coarsen_after_regrid.sbatch
    ```
