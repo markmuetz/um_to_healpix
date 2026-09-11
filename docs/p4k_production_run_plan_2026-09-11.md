@@ -63,14 +63,28 @@ All from the repo root on the login node. `P=~/.pixi/bin/pixi`.
 
 ## Failure handling
 
+Dependency structure: `create_stores` →(afterok)→ `regrid` array →(afterany)→ coarsen trigger → per dim
+`coarsen_<dim>_z9` →(afterok)→ `z8` → … → `z0`. Two remake constraints shape recovery:
+
+- A task **cannot be resubmitted while its array is still queued**: `remake run` skips a rule whose array is
+  queued, and `remake resubmit` re-executes the whole `submit.sh` (and refuses while any of it is queued).
+  Recovery is always: wait for the array to leave the queue, then **replan** with `remake run`, which submits
+  only failed/pending tasks (completed ones are skipped) plus a fresh downstream chain.
+- Cancelling or failing one element of a coarsen array **blocks all lower zooms of that dim**
+  (afterok → DependencyNeverSatisfied). Regrid failures do not block anything: the trigger is afterany and the
+  coarsen gating leaves out every batch that needs a missing date (including the whole-period z3–z0 batches).
+
 | Failure | Effect | Action |
 |---|---|---|
-| create_stores fails | regrid array never starts (afterok → DependencyNeverSatisfied) | Read `create_stores.log`; fix; `scancel` the regrid array; rerun step 3. If it failed on "Refusing to recreate existing zarr stores", something already wrote stores — investigate before deleting anything. |
-| Some regrid tasks fail (OOM at ~91/100G, timeout, S3 error, bad node) | Others continue; coarsen trigger still runs (afterany) and coarsens only fully-regridded batches | After the array leaves the queue: `remake info -F`; fix (e.g. bump `mem`, add node to `slurm_config['exclude']`); `remake run -E slurm remakefile_regrid.py` resubmits only failed/pending tasks; then rerun coarsen to pick up the rest. |
-| Slow node | Tasks 3–5× slower (host1114, host1240 seen) | Add to `exclude` (config, untracked → no reruns); affects the next submission only; `scancel` stragglers and resubmit if needed. |
-| A coarsen task fails | Downstream zoom rules for that dim never start (rule-level afterok) | `scancel` the stuck arrays; `remake run -E slurm remakefile_coarsen.py` resubmits failed + downstream. |
-| Home quota | Tasks fail to record results (logged earlier today) | Keep headroom; the run adds ~250 MB. |
-| Input purge | Inputs are on another user's scratch (`scratch-pw6/cscullio`) | Launch soon; failed input reads show as task failures. |
+| create_stores fails | regrid array and trigger never start (DependencyNeverSatisfied) | Read `create_stores.log`; fix; `scancel` regrid array + trigger; rerun launch steps 3–4. If it failed on "Refusing to recreate existing zarr stores", something already wrote stores — investigate before deleting anything. |
+| Some regrid tasks fail (OOM at ~91/100G, timeout, S3 error, bad node) | Others continue; trigger still coarsens everything fully regridded | After the regrid array leaves the queue: `remake info -F`; fix (e.g. bump `mem`, add node to `exclude`); `remake run -E slurm remakefile_regrid.py` (only failed tasks); when those succeed, `remake run -E slurm remakefile_coarsen.py` for the batches that were left out. |
+| Slow regrid task / node (3–5× seen: host1114, host1240) | Occupies one of 60 slots; only matters if it becomes the last straggler | **Don't cancel mid-array.** Add the node to `exclude` (affects later submissions). If a task is still running ≫ the rest (e.g. >1 h after all others finished), `scancel` it and recover as for a failed regrid task. |
+| A coarsen task fails | Lower zooms of that dim blocked | After that rule's array leaves the queue: `scancel` the blocked downstream arrays; fix; `remake run -E slurm remakefile_coarsen.py` (resubmits failed task + downstream chain; completed batches skipped). |
+| Slow coarsen task | Holds up the next zoom of that dim | Leave it unless clearly hung (no new `Completed:` lines for a long time) — cancelling means rebuilding the chain as above. |
+| Home quota | Tasks fail to record results (seen 2026-09-11) | Keep headroom; the run adds ~250 MB. |
+| Input purge | Inputs are on another user's scratch (`scratch-pw6/cscullio`) | Failed input reads show as task failures; recover as above once inputs are restored. |
+
+All recoveries and slow-node cancellations are reported via ntfy (`hk26-jasmin-updates`).
 
 Rollback (if outputs are wrong): delete the p4k prod stores on S3, mark the tasks pending
 (`remake set-state ... --pending`), fix, rerun from step 3.
