@@ -31,6 +31,11 @@ donedir = Path(f'/work/scratch-nopw2/mmuetz/donedir/{deploy}')
 logdir = Path(f'/work/scratch-nopw2/mmuetz/um2hp/logs/{deploy}/{output_vn}')
 pp_indexdir = Path('/work/scratch-nopw2/mmuetz/um2hp/pp_index')
 
+# Sims processed by the remake pipelines (remakefile_regrid.py/remakefile_coarsen.py); the others were
+# processed by um_slurm_control.py. Restricting this keeps plans fast and stops an unqueried `remake run`
+# from touching other sims' outputs.
+remake_config_keys = ['glm.n2560_RAL3p3_tuned_p4k']
+
 # Defaults - can be overridden.
 slurm_config = dict(
     account='hrcm',

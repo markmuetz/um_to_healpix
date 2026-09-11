@@ -28,7 +28,8 @@ from um_to_healpix.util import load_config
 CONFIG_PATH = Path('config/hk26_config.py')
 config_module = load_config(CONFIG_PATH)
 PROCESSING_CONFIG = config_module.processing_config
-CONFIG_KEYS = list(PROCESSING_CONFIG.keys())
+# Only the sims this pipeline is responsible for (config.remake_config_keys; default all).
+CONFIG_KEYS = list(getattr(config_module, 'remake_config_keys', PROCESSING_CONFIG.keys()))
 OUTPUT_LOCATION = {'deploy': config_module.deploy, 'output_vn': config_module.output_vn}
 
 rmk = Remake(config={
@@ -139,7 +140,7 @@ def regrid_inputs(config_key, date):
     uses={'UMProcessTasks': UMProcessTasks, 'OUTPUT_LOCATION': OUTPUT_LOCATION},
     # qos=standard rejects >1 CPU per job.
     config={'slurm': {'qos': 'high', 'mem': '100G', 'time': '10:00:00', 'cpus-per-task': 6,
-                      'array_throttle': 40}},
+                      'array_throttle': 60}},
 )
 def regrid(inputs, config_key, date):
     import pandas as pd

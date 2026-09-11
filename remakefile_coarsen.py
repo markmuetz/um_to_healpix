@@ -32,6 +32,8 @@ CONFIG_PATH = Path('config/hk26_config.py')
 REGRID_REMAKEFILE = 'remakefile_regrid.py'
 config_module = load_config(CONFIG_PATH)
 PROCESSING_CONFIG = config_module.processing_config
+# Only the sims this pipeline is responsible for (config.remake_config_keys; default all).
+CONFIG_KEYS = list(getattr(config_module, 'remake_config_keys', PROCESSING_CONFIG.keys()))
 OUTPUT_LOCATION = {'deploy': config_module.deploy, 'output_vn': config_module.output_vn}
 
 NBATCH = 10
@@ -96,7 +98,8 @@ def _coarsen_matrix(dim, zoom):
     done = _regrid_done_dates()
     time_idx = _time_index(config_module, dim)
     rows = []
-    for config_key, cfg in PROCESSING_CONFIG.items():
+    for config_key in CONFIG_KEYS:
+        cfg = PROCESSING_CONFIG[config_key]
         if zoom >= cfg['max_zoom']:
             continue
         batch_len = _batch_len(cfg, dim, zoom)
@@ -123,7 +126,8 @@ def _make_coarsen_rule(dim, zoom, upstream):
             '_time_index': _time_index,
             '_batch_len': _batch_len,
         },
-        config={'slurm': {'mem': '100G'}},
+        # Peak RSS in the z9 test: 2d 2.2G, 3d 8.7G; lower zooms read more time steps per chunk.
+        config={'slurm': {'mem': '32G', 'array_throttle': 60}},
     )
     def coarsen(config_key, start):
         import pandas as pd
@@ -162,7 +166,7 @@ def _make_coarsen_rule(dim, zoom, upstream):
 
 # Build one zoom chain per dim: coarsen_<dim>_z{MAX_ZOOM-1} has no upstream, then each zoom depends on the next
 # highest. Sims with a lower max_zoom (N1280: 9) have no tasks in the higher rules.
-MAX_ZOOM = max(cfg['max_zoom'] for cfg in PROCESSING_CONFIG.values())
+MAX_ZOOM = max(PROCESSING_CONFIG[k]['max_zoom'] for k in CONFIG_KEYS)
 
 coarsen_rules = []
 for dim in DIMS:

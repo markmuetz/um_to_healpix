@@ -8,6 +8,9 @@ Usage (repo root, pixi env):
     pixi run python scripts/compare_stores.py glm.n2560_RAL3p3.tuned --a dev_remake --b prod --zoom 10 \
         --times 2020-01-20T06 2020-01-24T13 --levels 1000 500 100
 
+With --b-key, B is a different sim (e.g. a perturbed run vs its control): structure, coverage and NaN patterns
+should still match, and meanDiff (A - B) shows whether the value differences are plausible.
+
 N.B. float32 has a relative precision of ~6e-8 (1 ulp), so rtol=1e-7 means "at most ~1-2 ulp".
 """
 import argparse
@@ -53,6 +56,7 @@ def compare_field(a, b, rtol):
     denom = np.maximum(np.abs(b[both]), np.finfo(np.float32).tiny)
     rel = diff / denom
     return {
+        'mean_diff': float((a[both] - b[both]).mean()) if both.any() else 0.0,
         'n': int(a.size),
         'nan_a': int(nan_a.sum()),
         'nan_b': int(nan_b.sum()),
@@ -70,6 +74,7 @@ def main():
     parser.add_argument('config_key')
     parser.add_argument('--a', default='dev_remake', help='deploy of store A (checked for coverage)')
     parser.add_argument('--b', default='prod', help='deploy of store B (reference)')
+    parser.add_argument('--b-key', default=None, help='config_key of store B (default: same as A)')
     parser.add_argument('--zoom', type=int, default=10)
     parser.add_argument('--times', nargs='+', required=True, help='ISO times to compare (nearest available)')
     parser.add_argument('--levels', nargs='+', type=float, default=[1000, 500, 100], help='pressure levels (hPa)')
@@ -85,7 +90,8 @@ def main():
 
     for freq in ['PT1H', 'PT3H']:
         url_a = tpl.format(freq=freq, zoom=args.zoom).replace(f'/{config.deploy}/', f'/{args.a}/')
-        url_b = tpl.format(freq=freq, zoom=args.zoom).replace(f'/{config.deploy}/', f'/{args.b}/')
+        tpl_b = config.processing_config[args.b_key or args.config_key]['zarr_store_url_tpl']
+        url_b = tpl_b.format(freq=freq, zoom=args.zoom).replace(f'/{config.deploy}/', f'/{args.b}/')
         print(f'\n=== {freq} z{args.zoom}\n  A: {url_a}\n  B: {url_b}')
         ds_a, ds_b = open_store(url_a), open_store(url_b)
 
@@ -97,8 +103,9 @@ def main():
             if coord in ds_a.coords or coord in ds_b.coords:
                 if not (coord in ds_a.coords and coord in ds_b.coords and ds_a[coord].equals(ds_b[coord])):
                     flagged.append(f'{freq}: coord {coord} differs')
+        ignore_attrs = IGNORE_ATTRS | ({'simulation'} if args.b_key else set())
         attr_diff = {k for k in set(ds_a.attrs) | set(ds_b.attrs)
-                     if k not in IGNORE_ATTRS and ds_a.attrs.get(k) != ds_b.attrs.get(k)}
+                     if k not in ignore_attrs and ds_a.attrs.get(k) != ds_b.attrs.get(k)}
         if attr_diff:
             flagged.append(f'{freq}: global attrs differ: {sorted(attr_diff)}')
 
@@ -120,7 +127,7 @@ def main():
         # Values.
         print(f'  values at {[f"{times[i]:%Y-%m-%dT%H}" for i in tidx]}:')
         hdr = f'    {"var":8s} {"time":13s} {"lev":>6s} {"nanA":>9s} {"nanB":>9s} {"nanMis":>7s} ' \
-              f'{"nDiff":>9s} {"maxAbs":>10s} {"maxRel":>10s} {">rtol":>7s}'
+              f'{"nDiff":>9s} {"maxAbs":>10s} {"maxRel":>10s} {">rtol":>7s} {"meanDiff":>10s}'
         print(hdr)
         for var in variables:
             if (ds_a[var].attrs.get('units'), ds_a[var].attrs.get('standard_name')) != \
@@ -140,7 +147,7 @@ def main():
                     lev_str = '' if lev is None else f'{lev:g}'
                     print(f'    {var:8s} {times[i]:%Y-%m-%dT%H} {lev_str:>6s} {r["nan_a"]:9d} {r["nan_b"]:9d} '
                           f'{r["nan_mismatch"]:7d} {r["n_diff"]:9d} {r["max_abs"]:10.3g} {r["max_rel"]:10.3g} '
-                          f'{r["n_over_rtol"]:7d}', flush=True)
+                          f'{r["n_over_rtol"]:7d} {r["mean_diff"]:10.3g}', flush=True)
                     if r['nan_mismatch'] or r['n_over_rtol']:
                         where = ''
                         if r['argmax_rel'] is not None:
