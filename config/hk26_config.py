@@ -48,7 +48,8 @@ slurm_config = dict(
     nconcurrent_tasks=60,
     # Nodes to avoid (remake pipelines: passed as #SBATCH --exclude). Comma-separated, '' for none.
     # host1114, host1240: regrid ran ~3-5x slower than other nodes (2026-09-11).
-    exclude='host1114,host1240',
+    # host1239: ~20x slower, not load-related (2026-09-11 p4k run).
+    exclude='host1114,host1240,host1239',
 )
 
 shared_metadata = {
