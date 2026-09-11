@@ -29,9 +29,10 @@ REPO = Path(__file__).resolve().parent.parent
 RULES = ['create_stores', 'regrid'] + [f'coarsen_{d}_z{z}' for d in ('2d', '3d') for z in range(9, -1, -1)]
 FAIL_STATES = {'FAILED', 'OUT_OF_MEMORY', 'TIMEOUT', 'NODE_FAIL', 'CANCELLED', 'BOOT_FAIL', 'DEADLINE', 'PREEMPTED'}
 # Slow threshold: max(floor minutes, factor x median completed elapsed).
-# Regrid tasks packed onto busy nodes routinely take 2-4x the median (seen: 150+ min vs 45 min median), and
-# recover on their own, so SLOW is only for real outliers; STALLED (no log output) is what needs acting on.
-SLOW = {'create_stores': (120, 4), 'regrid': (240, 4)}
+# Memory-pressured nodes make the 3d_ml relevel step 10-30x slower (RSS sits at ~95G of the 100G limit), so
+# multi-hour regrid tasks are common and recover on their own. SLOW is therefore set to warn while there is
+# still time to act before the 10 h walltime; STALLED (no log output) is the signal that needs acting on.
+SLOW = {'create_stores': (120, 4), 'regrid': (480, 8)}
 SLOW_DEFAULT = (90, 4)
 LOGDIR = Path('/work/scratch-nopw2/mmuetz/um2hp/logs/prod/v7/glm.n2560_RAL3p3_tuned_p4k')
 
