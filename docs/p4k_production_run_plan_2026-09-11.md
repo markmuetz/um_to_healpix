@@ -1,6 +1,6 @@
 # Production run plan: glm.n2560_RAL3p3_tuned_p4k with remake3 (2026-09-11)
 
-**Status: PLANNED — not launched.** Launch only after review.
+**Status: LAUNCHED 2026-09-11** (approved after review). Monitoring: `scripts/watch_remake.py` (ntfy topic `hk26-jasmin-updates`).
 
 ## What
 

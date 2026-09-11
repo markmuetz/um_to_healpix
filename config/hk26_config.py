@@ -15,7 +15,7 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
 
 # Global config.
 output_vn = 'v7'
-deploy = 'dev_remake'  # TODO: revert to 'prod' — set for remake3 test (docs/remake3_test_plan_2026-09-11.md)
+deploy = 'prod'
 # Location of input files.
 dy3dir = Path('/gws/ssde/j25b/kscale/DYAMOND3_reruns/')
 dy3dir_scratch = Path('/work/scratch-pw5/rwjones/kscale/DYAMOND3_reruns/')
