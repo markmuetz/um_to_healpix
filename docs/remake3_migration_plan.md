@@ -160,3 +160,26 @@ remake run remakefile_coarsen.py -E slurm
 - **Loop-generated rules**: The coarsen zoom chain uses `__name__` renaming and closure-captured zoom values. Needs validation that remake3 registers these correctly and that AST-based change detection works on them.
 - **SLURM throttling**: Multiple tasks write regions of shared zarr stores. Check that remake3's SLURM executor supports array job throttling (`%N`) to avoid S3 contention.
 - **Input scanning at plan time**: The regrid matrix scans .pp file directories. `remake run` planning must happen on JASMIN where the data is visible.
+
+## Status / findings (2026-09-11)
+
+First test run of the remakefiles. Details, commands and a progress log are in `remake3_test_plan_2026-09-11.md`.
+
+### Risks resolved
+- **Loop-generated rules**: register correctly as `coarsen_z9 → … → coarsen_z0` (checked with `remake rule-dag -N`). AST change detection on them is not yet verified.
+- **SLURM throttling**: supported via the per-rule `array_throttle` slurm config key (`--array=0-N%T`).
+- **Input scanning at plan time**: fast. A filtered regrid plan takes about 5 s.
+
+### New findings (fixed on this branch)
+- **`uses=` values are hashed by `repr()`**: `PROCESSING_CONFIG`'s repr contains function addresses (`at 0x7f…`), so every task would rerun on every invocation. The config is now loaded inside the rule bodies and is not tracked. Only `deploy`/`output_vn` go in `uses=`, so switching output location reruns tasks.
+- **SLURM keys are written verbatim** as `#SBATCH --<key>=<value>`, so the key must be `cpus-per-task`, not `cpus_per_task`.
+- **qos**: `standard` rejects >1 CPU per job (`QOSMaxCpuPerNode`), so `regrid`/`coarsen` need `qos=high` (as the old code used).
+- **Coarsen `donepath`**: `coarsen_healpix_region` required a `donepath` per subtask. It's now optional.
+- **Weights**: `_gen_orog_land_sea` asserted that the weights existed but ran before weight generation. It now generates them if missing (weightsdir had been purged).
+- **kscale GWS moved** to `/gws/ssde/j25b/kscale`.
+
+### Deviations from the plan above
+- The rule bodies still call `UMProcessTasks` and `find_dyamond3_pp_dates_to_paths`. Before step 6 (delete `um_slurm_control.py`/`um_process_tasks.py`), that logic must move into standalone functions.
+- Step 4 (local test) was skipped: an N2560 regrid needs about 100 GB and 6 CPUs, so testing went straight to SLURM on a small slice.
+- `config/hk26_config.py` is not unchanged: it has the path fix, an optional per-sim `pp_glob`, and the new `glm.n2560_RAL3p3_tuned_p4k` sim.
+- The environment is pixi (`[tool.pixi.*]` in `pyproject.toml`), not conda.

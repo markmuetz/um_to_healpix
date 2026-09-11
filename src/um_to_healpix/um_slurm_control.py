@@ -107,9 +107,12 @@ def write_tasks_slurm_job_array(slurm_config, config_key, tasks, job_name, job_i
     return slurm_script_path
 
 
-def find_dyamond3_pp_dates_to_paths(basedir):
+DEFAULT_PP_GLOB = 'field.pp/apve*/**/*.pp'
+
+
+def find_dyamond3_pp_dates_to_paths(basedir, pp_glob=DEFAULT_PP_GLOB):
     """Search for pp_paths with a specific date (N.B. filename sensitive)."""
-    pp_paths = sorted(basedir.glob('field.pp/apve*/**/*.pp'))
+    pp_paths = sorted(basedir.glob(pp_glob))
     logger.debug(f'found {len(pp_paths)} pp paths')
     pp_paths = [p for p in pp_paths if p.is_file()]
     dates_to_paths = defaultdict(list)

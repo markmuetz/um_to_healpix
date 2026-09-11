@@ -180,3 +180,7 @@ cython_debug/
 
 /slurm
 output_tests/figures/
+
+# pixi / remake
+.pixi/
+.remake/

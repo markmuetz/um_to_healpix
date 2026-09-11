@@ -264,7 +264,10 @@ class UMProcessTasks:
         weights_path = (config['weightsdir'] /
                         weights_filename(land, config['max_zoom'],
                                          'longitude', 'latitude', add_cyclic, regional))
-        assert weights_path.exists(), f'{weights_path} does not exist'
+        if not weights_path.exists():
+            logger.info(f'No weights for orog/land-sea mask, generating: {weights_path}')
+            gen_weights(land, weights_path=weights_path, zoom=max_zoom, lonname='longitude', latname='latitude',
+                        add_cyclic=add_cyclic, regional=regional)
         weights = xr.load_dataset(weights_path)
         regridder = LatLon2HealpixRegridder(weights=weights, zoom_level=max_zoom, add_cyclic=add_cyclic,
                                             regional=regional)
@@ -564,14 +567,16 @@ class UMProcessTasks:
 
             start_idx = subtask['start_idx']
             end_idx = subtask['end_idx']
-            donepath = Path(subtask['donepath'])
             logger.debug((start_idx, end_idx))
 
             coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end_idx, chunks, regional)
-            donepath.parent.mkdir(parents=True, exist_ok=True)
             logger.trace(f'completed subtask {subtask}')
-            logger.info(f'writing donepath: {donepath}')
-            donepath.write_text(subtask_log.getvalue())
+            # donepath is only used by um_slurm_control; remake tracks completion itself.
+            if 'donepath' in subtask:
+                donepath = Path(subtask['donepath'])
+                donepath.parent.mkdir(parents=True, exist_ok=True)
+                logger.info(f'writing donepath: {donepath}')
+                donepath.write_text(subtask_log.getvalue())
             logger.remove(logger_id)
 
         logger.info('completed')

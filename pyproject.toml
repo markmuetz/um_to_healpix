@@ -78,3 +78,43 @@ omit = ["*/plotting/*"]
 
 [tool.coverage.report]
 show_missing = true
+
+# Pixi environment (conda-forge + editable local packages).
+# Usage: pixi install; pixi run test; pixi run remake ...
+[tool.pixi.workspace]
+channels = ["conda-forge"]
+platforms = ["linux-64"]
+
+[tool.pixi.dependencies]
+python = "3.12.*"
+aiohttp = "*"
+cartopy = "*"
+cf-units = "*"
+click = "*"
+dask = "*"
+distributed = "*"
+easygems = "==0.0.14"  # 0.1.x introduces a pole singularity in compute_weights_delaunay
+esmpy = "*"
+healpy = "*"
+iris = "*"
+joblib = "*"
+loguru = "*"
+mo_pack = "*"
+networkx = "*"
+numpy = "*"
+pandas = "*"
+python-stratify = "*"
+s3fs = ">=2025.1"
+scipy = "*"
+xarray = "*"
+zarr = "*"
+pytest = "*"
+pytest-cov = "*"
+ipython = "*"
+
+[tool.pixi.pypi-dependencies]
+um_to_healpix = { path = ".", editable = true }
+remake = { path = "../../remake", editable = true }
+
+[tool.pixi.tasks]
+test = "pytest tests/"
