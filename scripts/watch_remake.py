@@ -115,6 +115,7 @@ def main():
     parser.add_argument('--interval', type=int, default=60, help='seconds between polls')
     parser.add_argument('--heartbeat', type=int, default=30, help='minutes between PROGRESS lines')
     parser.add_argument('--stall', type=int, default=75, help='minutes of no log output before STALLED')
+    parser.add_argument('--no-slow', action='store_true', help='suppress SLOW events (timeouts still show as FAIL)')
     args = parser.parse_args()
 
     seen = set()
@@ -150,7 +151,7 @@ def main():
             floor, factor = SLOW.get(rule, SLOW_DEFAULT)
             threshold = max(floor, factor * statistics.median(ok_times)) if len(ok_times) >= 5 else 2 * floor
             for i, (state, reason, elapsed, node) in queued.items():
-                if state == 'RUNNING' and elapsed > threshold and (jid, i, 'slow') not in seen:
+                if state == 'RUNNING' and elapsed > threshold and not args.no_slow and (jid, i, 'slow') not in seen:
                     seen.add((jid, i, 'slow'))
                     median = f'{statistics.median(ok_times):.0f}' if ok_times else '-'
                     event(f'SLOW {rule}[{i}] running {elapsed:.0f} min on {node} '
