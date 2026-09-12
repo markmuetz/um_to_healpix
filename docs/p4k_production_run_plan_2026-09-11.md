@@ -108,3 +108,19 @@ Rollback (if outputs are wrong): delete the p4k prod stores on S3, mark the task
   coarsen batches (`--force -Q 'start ...'`).
 - `regrid`'s `uses=` includes all of `UMProcessTasks`: editing any method (even coarsen code) marks all 812
   regrid tasks stale. Don't edit the class mid-run; if needed, re-stamp with `set-state --success`.
+
+## Throughput experiment (2026-09-12)
+
+Regrid throughput collapsed overnight (30/h → 11–15/h) because 8–12 tasks were packed per 1.5 TB node, each
+peaking at ~95 GB of its 100 GB limit: the `model_level_to_pressure` step then spends its time in memory
+reclaim (one task: 312 min of its 5 h in gaps > 5 min, ~200 min of that in relevel). S3 write retries were
+*not* the cause: 53 retry events (5–15 s sleeps) across 382 task logs. 27 tasks hit the 10 h walltime or OOM.
+
+| Setting | Concurrency | Mem/task | Completed sample | Mean duration | Packing |
+|---|---|---|---|---|---|
+| Launch (18:18–07:57) | 60 | 100G | 336 | 45 min early, 4–10 h once packed | up to 12/node |
+| Change 1 (07:57) | 30 | 128G | 19 | **27.9 min** (median 27, 24–38) | max 6/node |
+| Change 2 (11:32) | 45 | 128G | (see below) | | |
+
+Applied to the running array with `scontrol update JobId=<id> ArrayTaskThrottle=<n> MinMemoryNode=131072`
+(MB, not "128G"); affects queued tasks only. qos=high caps concurrency at 82 tasks at 128 GB.
