@@ -161,8 +161,11 @@ def main():
                         where = ''
                         if r['argmax_rel'] is not None:
                             import healpix
-                            lon, lat = healpix.pix2ang(2 ** args.zoom, int(ds_a.healpix_index.values[r['argmax_rel']]),
-                                                       nest=True, lonlat=True)
+                            # A field can have a dimension we do not select over (mrsol has depth), so the
+                            # flat index of the max difference runs over (extra dims, cell): take it mod ncell.
+                            ncell = len(ds_a.healpix_index)
+                            cell = int(ds_a.healpix_index.values[r['argmax_rel'] % ncell])
+                            lon, lat = healpix.pix2ang(2 ** args.zoom, cell, nest=True, lonlat=True)
                             where = f' (max rel diff at lon={float(lon):.2f}, lat={float(lat):.2f})'
                         flagged.append(f'{freq} {var} {times[i]:%Y-%m-%dT%H} {lev_str}: nan_mismatch={r["nan_mismatch"]}, '
                                        f'{r["n_over_rtol"]}/{r["n"]} cells over rtol={args.rtol:g}, '
