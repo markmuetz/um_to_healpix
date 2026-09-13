@@ -1,6 +1,7 @@
 # Production run plan: glm.n2560_RAL3p3_tuned_p4k with remake3 (2026-09-11)
 
-**Status: LAUNCHED 2026-09-11** (approved after review). Monitoring: `scripts/watch_remake.py` (ntfy topic `hk26-jasmin-updates`).
+**Status: COMPLETE 2026-09-13 15:18** (45 h; launched 2026-09-11 18:18). Verified — see "Outcome" and
+"Changes required before the next run" at the end of this document.
 
 ## What
 
@@ -151,3 +152,177 @@ Implications for the next long run:
   SLOW 100 → 150 → 240 → 480 min → off), each retune costing a watcher restart and a burst of re-reported events.
 - Long-lived monitoring is cheapest attached to a session that is *also* doing work; a purely idle watch still
   pays ~4-5 M cache-creation tokens/day at 1-minute polling.
+
+---
+
+# Outcome (2026-09-13)
+
+`s3://sim-data/prod/v7/glm.n2560_RAL3p3_tuned_p4k/` is complete: 22 stores (PT1H/PT3H × z0–z10),
+9,745 hourly and 3,249 3-hourly time steps, 2020-01-20 → 2021-03-01.
+remake: `regrid` 813/813 and `coarsen` 1,462/1,462 tasks up to date, 0 failed, 0 pending.
+
+| Stage | Tasks | Wall clock | Notes |
+|---|---|---|---|
+| create_stores | 1 | 31 min | weights already existed |
+| regrid | 812 | 18:49 Fri → 00:36 Sun | 785 first pass + 27 reruns (done 03:01 Sun) |
+| coarsen z9 | 1,300 | 03:03 → 09:17 Sun | 1,262 first pass + 38 reruns after the S3 outage |
+| coarsen z8–z0 | 162 | 09:17 → 15:18 Sun | 3d chain rerun at 128 GB after OOM |
+| **Total** | **2,275** | **45 h** | inside the 48 h target |
+
+## Verification
+
+`scripts/compare_stores.py` vs the control sim (`glm.n2560_RAL3p3.tuned`, prod) at z10, z5, z2, z0:
+
+- **Coverage complete**: every variable has all time steps written, `gaps=0`, full range to 2021-03-01.
+  (3-hourly instantaneous fields start 2020-01-20T00, time-means 2020-01-20T03 — expected.)
+- **Structure identical** to the control: variables, coords, chunking. Only differing global attribute is
+  `simulation_description`.
+- **NaN patterns identical** (0 mismatches), i.e. the land/sea and missing-data masks agree.
+- **Differences physically sensible for +4K SST**: `tas` +4.87/+4.51/+5.09 K at three dates spread over the
+  period, `rlut` +11.5…+12.1 W m-2, `pr` +3.5…+7.1e-06 kg m-2 s-1, `psl` +35…+54 Pa, `clt` −0.9…−2.3 %,
+  `uas` +0.15 m s-1.
+- The "188 flagged" entries in each report are by construction: with `--b-key` every field differs; the huge
+  `max_rel` values are divisions by near-zero values (cloud ice), so `meanDiff` is the meaningful column.
+
+## Incidents
+
+1. **Regrid memory thrashing (the expensive one).** `mem=100G` against a measured peak of 98.5 GB (mean 84.6 GB
+   over 812 tasks). When SLURM packed 8–12 tasks onto a 1.5 TB node, the `model_level_to_pressure` step spent its
+   time in memory reclaim: one task logged 312 min of gaps > 5 min in a 5 h run, ~200 min of it in relevel.
+   Throughput fell from ~30/h to 11–15/h overnight; 23 tasks hit the 10 h walltime, 1 OOMed.
+   Fixed mid-run with `scontrol` (128 GB, throttle 45): per-task mean fell to ~45 min and throughput rose to ~49/h.
+2. **S3 outages.** 06:14–06:30 and 15:32–15:42 on 2026-09-13. Bucket listings timed out from compute nodes *and*
+   from the login node, so not caused by our load (though ~140 concurrent tasks at the time will not have helped).
+   Cost: 38 coarsen z9 batches, because reads/listings have no retry logic — writes do
+   (`util.async_da_to_zarr_with_retries`, 53 benign retry events across 382 regrid logs).
+3. **coarsen 3d z8 OOM.** `mem=32G` for every coarsen rule; 3d z8 peaks at 42.7 GB (each z8 batch reads ~16× a z9
+   batch). 18 of 21 tasks were killed; rerun at 128 GB succeeded.
+4. **One genuinely slow node**, host1239 (~20× slower, not load-related) — excluded. All other "slow nodes" were
+   just busy: the eight fastest and slowest nodes are identical hardware (AMD EPYC 9654, 192 cores, 1.54 TB).
+
+## Measurements
+
+**Regrid** (n=812): MaxRSS mean 84.6 GB, max 98.5 GB. CPU: `nproc=6` hardcoded (`um_process_tasks.py:88`),
+matching `cpus-per-task=6`.
+
+Throttle experiment at 128 GB (mean task duration / completions per hour):
+
+| Throttle | Mean duration | Completions/h |
+|---|---|---|
+| 30 | 53.7 min | 22 |
+| **45** | **51–59 min** | **48–49** |
+| 60 | 66.3 min | 39–41 |
+
+**Coarsen** (peak RSS and median duration per rule, 32 GB requested except 3d ≥ z8 which used 128 GB):
+
+| Rule | Tasks | Peak RSS | Median | Rule | Tasks | Peak RSS | Median |
+|---|---|---|---|---|---|---|---|
+| 2d z9 | 975 | 2.6 GB | 28 min | 3d z9 | 325 | 12.0 GB | 36 min |
+| 2d z8 | 61 | 6.0 GB | 43 min | 3d z8 | 21 | **42.7 GB** | 104 min |
+| 2d z7 | 16 | 4.7 GB | 19 min | 3d z7 | 6 | **42.8 GB** | 33 min |
+| 2d z6 | 16 | 1.9 GB | 8 min | 3d z6 | 6 | 10.7 GB | 9 min |
+| 2d z5 | 16 | 0.8 GB | 6 min | 3d z5 | 6 | 2.7 GB | 4 min |
+| 2d z4–z0 | 8 | ≤0.8 GB | 1–5 min | 3d z4–z0 | 6 | ≤1.9 GB | 0–3 min |
+
+**Coarsen CPU: 0.11 cores (2d) and 0.30 cores (3d) of the 12 requested** — these tasks are I/O bound on S3.
+Aggregate throughput was ~215 batches/h whether 37 or 111 tasks ran concurrently, i.e. S3-limited, so extra
+concurrency only divides the same bandwidth (and the 06:14 failures came while concurrency was highest).
+
+**Node packing vs speed** (regrid, tasks started after 12:00, 35 nodes, identical hardware):
+
+| Our tasks on the node | Nodes | Mean duration |
+|---|---|---|
+| 3–4 | 11 | 60 min |
+| 5–7 | 15 | 74 min |
+| 8+ | 7 | 104 min |
+
+Correlation is only 0.04 because *other users'* load matters as much: host1222 had 3 of our tasks and a 170 min
+mean at CPU load 175/192; host1030 had CPU load 0 and a 27 min mean. The node's ratio is 8 GB/core; a regrid task
+wants 95 GB with 6 cores (16 GB/core), so SLURM fills a node's memory long before its cores.
+
+---
+
+# Changes required before the next run
+
+Ordered by value. Items 1–3 are enough to avoid every incident above.
+
+## 1. Right-size the resource requests (remakefiles)
+
+`remakefile_regrid.py`, `regrid` rule: `mem` 100G → **128G**, `array_throttle` 60 → **45**.
+
+`remakefile_coarsen.py`, per-rule instead of a flat 32 GB + 12 CPUs. Peak + ~50 % for a first run, then peak + 25 %:
+
+| Rule | Peak seen | Set |
+|---|---|---|
+| 2d z9 | 2.6 GB | 8 GB |
+| 2d z8–z0 | ≤6.0 GB | 16 GB |
+| 3d z9 | 12.0 GB | 24 GB |
+| 3d z8, z7 | 42.8 GB | 64 GB |
+| 3d z6–z0 | ≤10.7 GB | 24 GB |
+
+`cpus-per-task` 12 → **2** for all coarsen rules (measured 0.11–0.30 cores).
+
+**N.B. editing a rule changes its code hash, so all completed tasks go stale.** After editing, re-stamp:
+`remake set-state remakefile_<x>.py -Q '<succeeded tasks>' --success` — otherwise the next `remake run`
+resubmits all 2,275 tasks (and `create_stores` would refuse, since the stores now exist).
+
+## 2. Retry S3 reads and listings
+
+Reads and `open_zarr`/listing calls have no retry logic; a momentary failure kills the task. Wrap them as writes
+already are (`util.async_da_to_zarr_with_retries`), and/or set `botocore.config.Config(read_timeout=…,
+retries={'max_attempts': 10, 'mode': 'adaptive'})` in `get_jasmin_s3()`. This alone would have saved the 38
+batches lost on 2026-09-13, and would make the pipeline robust to the ~10–16 min outages seen twice in one day.
+
+## 3. Cut regrid's peak memory (~95 GB)
+
+The root cause of incident 1: at 16 GB/core the task cannot be scheduled without oversubscribing node memory.
+Process one group at a time and free cubes, and/or chunk the vertical interpolation instead of holding all model
+levels for all variables. Halving it to ~45 GB would match the nodes' 8 GB/core ratio and remove the thrashing
+risk; it also doubles how many tasks fit per node.
+
+## 4. Wire `nproc` to the CPU request
+
+`um_process_tasks.py:88` hardcodes `nproc=6`. Read `SLURM_CPUS_PER_TASK` (as `um_process_tasks.py:590` already
+does) so that asking for more CPUs actually speeds up `_regrid_easygems_delaunay_parallel` (34 min of gaps in the
+slow task analysed) rather than idling, and so CPUs can be requested in proportion to memory.
+
+## 5. Verification and sanity plots as remake rules
+
+Agreed design (2026-09-13), to run **after** the whole coarsen chain:
+
+- `check_store`, matrix `(config_key, freq, zoom)` (22 tasks), `depends_on=[coarsen_2d_z0, coarsen_3d_z0]`, output
+  one JSON report per store. Checks: coverage (all chunks written, no gaps, full time range), NaN patterns,
+  per-variable ranges (reuse `output_tests/datasets.py: RANGE_CHECKS`), and level-to-level consistency
+  (a coarsened field ≈ the mean of its parents). Reference comparison against a control sim stays optional
+  (`--b-key`), since it only makes sense for perturbation pairs.
+- Sanity plot rules depending on `check_store`, so plots only exist for verified data. Reuse
+  `um_to_healpix.plotting`: `plot_zonal_mean` (pr across zooms), `plot_all_fields`, `plot_timeseries`,
+  and the clw pressure profile — `output_tests/test_plots.py` already has all four as pytest cases.
+- Select over **any** extra dimension, not just `pressure`: `mrsol` is hourly but has `depth` (the `2d_depth`
+  group), which is what broke `compare_stores.py` twice this weekend. Drive this off the variable's dims, not the
+  config group name, and apply range checks per level.
+- Keep `scripts/compare_stores.py` as the library the rules call, and as the ad-hoc tool.
+
+## 6. Smaller things
+
+- `compare_stores.py`: two bugs found and fixed this weekend — coverage counted zarr *chunk* indices as time
+  indices (wrong by the time-chunk factor below z9, commit 2b5c0ce), and the max-difference cell lookup broke on
+  variables with an extra dimension (84537bc). Consider a `--coverage-only` mode for cheap re-checks.
+- Node exclusion is rarely worth it: only host1239 was genuinely faulty. Today's busy node is tomorrow's fast one.
+- `--exclusive=user` would insulate tasks from other users' load, at the cost of idle cores; worth testing if
+  regrid's memory footprint cannot be reduced.
+- Housekeeping: the `dev_remake` test stores for the tuned sim (22 stores, Jan 20–31 2020) are still on S3 and can
+  be deleted once nobody needs the comparison.
+
+## Operational notes (worked well, keep)
+
+- A running array's settings can be changed without resubmitting: `scontrol update JobId=<id>
+  ArrayTaskThrottle=<n>`, `MinMemoryNode=<MB>` (megabytes — "128G" is rejected), `ExcNodeList=<nodes>`.
+  Only queued elements are affected, so it is a safe way to experiment mid-run.
+- To change resources for a *remake* submission without making tasks stale: `remake run -n -E slurm` to write the
+  scripts, edit `.remake/slurm/<rule>.sbatch`, then `remake resubmit`. Used for both recoveries.
+- remake constraints to plan around: a rule's tasks cannot be resubmitted while its array is queued (wait, then
+  replan); a failed/cancelled task in one zoom blocks every lower zoom of that dim (`afterok`), so recovery is
+  "cancel the blocked arrays, then `remake run`", which skips completed tasks and rebuilds the chain.
+- The coarsen gating (only batches whose `.pp` dates all have a *successful* regrid task) meant partial regrid
+  never produced partial coarsened data, and incremental reruns picked up exactly what was missing.
