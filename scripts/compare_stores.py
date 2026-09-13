@@ -33,8 +33,12 @@ def open_store(url):
     return xr.open_zarr(s3fs.S3Map(root=url, s3=get_jasmin_s3(), check=False), consolidated=True, chunks=None)
 
 
-def written_times(fs, url, var, ntime):
-    """Time indices for which every spatial (and level) chunk of var exists in the store."""
+def written_times(fs, url, var, ntime, time_chunk=1):
+    """Time indices covered by chunks for which every spatial (and level) chunk of var exists.
+
+    Zarr keys index *chunks*, not time steps: below z9 a chunk spans many time steps (time_chunk), so a chunk
+    index must be expanded to the steps it covers, or coverage is under-reported by that factor.
+    """
     keys = fs.ls(f'{url[5:]}/{var}', detail=False)
     counts = defaultdict(int)
     for key in keys:
@@ -44,7 +48,11 @@ def written_times(fs, url, var, ntime):
     if not counts:
         return []
     full = max(counts.values())
-    return sorted(t for t, n in counts.items() if n == full and t < ntime)
+    times = []
+    for chunk, n in counts.items():
+        if n == full:
+            times.extend(range(chunk * time_chunk, min((chunk + 1) * time_chunk, ntime)))
+    return sorted(t for t in times if t < ntime)
 
 
 def compare_field(a, b, rtol):
@@ -117,7 +125,8 @@ def main():
         # Coverage of A (which time steps are fully written).
         print('  coverage of A (fully written time steps):')
         for var in variables:
-            wt = written_times(fs, url_a, var, len(times))
+            chunks = ds_a[var].encoding.get('chunks') or (1,)
+            wt = written_times(fs, url_a, var, len(times), time_chunk=chunks[0])
             span = f'{times[wt[0]]:%Y-%m-%dT%H} .. {times[wt[-1]]:%Y-%m-%dT%H}' if wt else '-'
             gaps = (wt[-1] - wt[0] + 1 - len(wt)) if wt else 0
             print(f'    {var:8s} {len(wt):5d} steps  {span}  gaps={gaps}')
