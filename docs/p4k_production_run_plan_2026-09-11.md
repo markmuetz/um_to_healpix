@@ -124,3 +124,30 @@ reclaim (one task: 312 min of its 5 h in gaps > 5 min, ~200 min of that in relev
 
 Applied to the running array with `scontrol update JobId=<id> ArrayTaskThrottle=<n> MinMemoryNode=131072`
 (MB, not "128G"); affects queued tasks only. qos=high caps concurrency at 82 tasks at 128 GB.
+
+## Cost of Claude monitoring this run (measured 2026-09-13)
+
+From the session transcript (1,079 assistant messages, 2026-09-11 09:41 → 2026-09-13 13:40):
+
+| | Total | 09-11 (build + launch) | 09-12 (monitor) | 09-13 (monitor + recovery) |
+|---|---|---|---|---|
+| Output | 890,592 | 701,202 | 103,669 | 85,721 |
+| Cache creation | 10,905,539 | 1,927,324 | 4,112,736 | 4,865,479 |
+| Cache read | 289,853,122 | 177,858,416 | 57,439,106 | 54,555,600 |
+| Fresh input | 2,224 | 1,582 | 354 | 288 |
+
+~11.8 M non-cached tokens (output + cache creation), 290 M cache reads.
+
+**Idle monitoring is not free.** Output fell 8x after the build day, but cache creation *rose* (1.9 → 4.1 → 4.9 M/day):
+every monitor event re-primes a growing conversation context, whether or not it needs action. Most events needed
+none: packed-node SLOW warnings fired ~60 times and were always benign.
+
+Implications for the next long run:
+- Make the watcher filter, not the model: a suppressed event costs nothing, a forwarded one re-primes context.
+  `--no-slow`, STALLED (log mtime) instead of SLOW (elapsed), `--interval 300`, `--heartbeat 300` cut event volume
+  ~5x on 2026-09-12 with no loss of signal - every real incident (OOM, TIMEOUT, S3 outage) still surfaced.
+- Prefer one aggregated PROGRESS line over per-task events; report state *changes*, not states.
+- Start with the quiet settings: thresholds were retuned 4 times on the first night (75 → 150 → 240 min stall,
+  SLOW 100 → 150 → 240 → 480 min → off), each retune costing a watcher restart and a burst of re-reported events.
+- Long-lived monitoring is cheapest attached to a session that is *also* doing work; a purely idle watch still
+  pays ~4-5 M cache-creation tokens/day at 1-minute polling.
