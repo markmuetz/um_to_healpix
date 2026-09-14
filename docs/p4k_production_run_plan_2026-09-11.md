@@ -338,13 +338,13 @@ Agreed design (2026-09-13), to run **after** the whole coarsen chain:
 - `--exclusive=user` would insulate tasks from other users' load, at the cost of idle cores; worth testing if
   regrid's memory footprint cannot be reduced.
 - Housekeeping: the `dev_remake` test stores for the tuned sim (22 stores, Jan 20–31 2020) are still on S3 and can
-  be deleted once nobody needs the comparison. Note item 7 below wants to write into exactly these stores, so
-  hold off until that comparison is done.
-- The `.pp` source for p4k (`/work/scratch-pw6/cscullio/.../n2560_RAL3p3_tuned_p4k`, **43 TB**) must *not* be
-  deleted: it is owned by cscullio (not writable by us), and the zarr output is lossy relative to it — `apvere`
-  (406 files) is never read, only 39 variables are extracted, and z10 (12.6M cells) is coarser than the N2560
-  grid (19.7M points). Deleting it would make the run unreproducible and block item 7. If space is the concern,
-  the answer is archiving to tape/GWS, not deletion — scratch is not backed up.
+  be deleted once nobody needs the comparison.
+- The `.pp` source for p4k (`/work/scratch-pw6/cscullio/.../n2560_RAL3p3_tuned_p4k`, **43 TB**, owned by
+  cscullio) is **free to delete**: processing is complete and verified, and the zarr stores hold every variable
+  in the protocol we were given. Recorded for the future, since the streams contain more than the protocol asks
+  for: the pipeline reads `apvera`–`apverd` and ignores `apvere`, which carries 14 STASH codes found in no other
+  stream (`m01s01i201`, `m01s03i332`, `m01s02i204`, `m01s04i209`, `m01s09i218`, and `*i517`–`*i520` in sections
+  01 and 02). Those are out of scope for the protocol, so their loss is expected rather than a gap.
 
 ## 7. Conservative regridding via grid-doctor (future)
 
@@ -386,7 +386,12 @@ Things that will bite, in order:
 
 **Cheapest first experiment**, using tooling that already exists: regrid one date both ways into the `dev_remake`
 stores (the path used for the memory measurement in item 3), then compare with `scripts/compare_stores.py
---b-key`. Roughly 30 minutes of compute, before committing to any refactor.
+--b-key`. Roughly 30 minutes of compute, before committing to any refactor. Acceptance is a close match (low
+RMSE, high correlation), not bit correspondence. Note the p4k `.pp` source is being deleted, so pick a sim whose
+source is still on disk — the tuned control, which is what the `dev_remake` stores already hold.
+
+Whether this should then be applied consistently across *all* datasets is a separate question, and would mean
+reprocessing what has already been published.
 
 **Caution:** grid-doctor's own README calls it "a scripting solution for a proof of concept" and it is classified
 Alpha, so pin a git rev rather than tracking `main`.
