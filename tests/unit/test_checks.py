@@ -138,6 +138,19 @@ class TestCoverage:
         steps = checks.written_time_steps(fs, f's3://{path}', 'tas', 8, time_chunk=2)
         assert steps == list(range(8))
 
+    def test_end_steps_may_be_missing(self):
+        """Time-means have no first step, instantaneous fields no last, and coarsening drops the final step."""
+        assert checks.check_coverage_from_steps(list(range(1, 8)), 8) == []
+        assert checks.check_coverage_from_steps(list(range(0, 7)), 8) == []
+
+    def test_two_missing_at_an_end_is_a_failure(self):
+        failures = checks.check_coverage_from_steps(list(range(2, 8)), 8)
+        assert len(failures) == 1 and 'short by more than 1' in failures[0]
+
+    def test_internal_gap_is_a_failure(self):
+        failures = checks.check_coverage_from_steps([0, 1, 2, 5, 6, 7], 8)
+        assert len(failures) == 1 and '2 missing time steps inside' in failures[0]
+
     def test_missing_chunk_detected(self, store):
         import fsspec
         path, ds = store

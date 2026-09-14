@@ -98,10 +98,19 @@ async def async_da_to_zarr_with_retries(da, store, region, max_retries=5):
         raise Exception(f'failed to write {da.name} to zarr store {store} after {retries} retries')
 
 
-def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True):
+def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True, time_indices=None, dtype=np.float32):
+    """Interpolate a model-level cube onto pressure levels.
+
+    time_indices selects which time steps to do (default: all). Doing one step at a time keeps the output array
+    small: the full (12, 25, 3841, 5120) array is 44 GB in float64 and was the main reason a regrid task peaked at
+    ~95 GB. dtype float32 matches the zarr stores the result is written to (float64 precision is discarded there).
+    """
     logger.debug(f're-level model level to pressure for {cube.name()}')
     cube = cube[-p.shape[0]:]
     assert (p.coord('time').points == cube.coord('time').points).all()
+    if time_indices is None:
+        time_indices = range(cube.shape[0])
+    time_indices = list(time_indices)
 
     # Direction of pressure_levels must match that of air_pressure/p.
     # This runs, but it also inverts the 3D fields! Fix by inverting output.
@@ -110,20 +119,22 @@ def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True):
                            interpolation=stratify.INTERPOLATE_LINEAR,
                            extrapolation=stratify.EXTRAPOLATE_LINEAR,
                            rising=False)
-    new_cube_data = np.zeros((cube.shape[0], len(pressure_levels), cube.shape[2], cube.shape[3]))
-    for i in range(cube.shape[0]):
+    new_cube_data = np.zeros((len(time_indices), len(pressure_levels), cube.shape[2], cube.shape[3]), dtype=dtype)
+    for out_i, i in enumerate(time_indices):
         logger.trace(i)
         regridded_cube = relevel(cube[i], p[i], pressure_levels, interpolator=interpolator)
         # logger.trace(f'regridded_cube.data.sum() {regridded_cube.data.sum()}')
         # Fix 3D fields so that they are the right way round - invert output.
-        new_cube_data[i] = regridded_cube.data[::-1]
+        new_cube_data[out_i] = regridded_cube.data[::-1]
+        del regridded_cube
 
     if enforce_greater_than_zero:
         # Some values are ending up as negatives (why? Perhaps due to linear extrap. outside domain?)
         # Enfore greater than zero if so (these are all for mass_ fields - must by >= 0).
         new_cube_data[new_cube_data < 0] = 0
 
-    coords = [(cube.coord('time'), 0), (z.coord('pressure'), 1), (z.coord('latitude'), 2),
+    time_coord = cube[time_indices].coord('time') if len(time_indices) < cube.shape[0] else cube.coord('time')
+    coords = [(time_coord, 0), (z.coord('pressure'), 1), (z.coord('latitude'), 2),
               (z.coord('longitude'), 3)]
     new_cube = iris.cube.Cube(new_cube_data,
                               long_name=cube.name(),

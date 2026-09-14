@@ -546,18 +546,31 @@ class UMProcessTasks:
                 logger.info(msg)
                 logger.info('=' * len(msg))
                 map_item = name_map[key]
-                da = extractor.extract_da(map_item, group_cubes)
-
                 zoom = self.config['max_zoom']
-                # Do the regridding.
-                lonname = [c for c in da.coords if c.startswith('longitude')][0]
-                latname = [c for c in da.coords if c.startswith('latitude')][0]
-                weights_path = self.config['weightsdir'] / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
-                weights = xr.load_dataset(weights_path)
-                da_hp = regrid_da_to_healpix(da, zoom, short_name, long_name,
-                                             weights, self.drop_vars,
-                                             add_cyclic,
-                                             regional, regional_chunks=chunks[-1])
+
+                # Model-level variables arrive one time step at a time (their full lat/lon array is 44 GB);
+                # everything else is a single DataArray. Only the regridded healpix output accumulates.
+                weights = None
+                da_hp_parts = []
+                for da in extractor.extract_da_steps(map_item, group_cubes):
+                    # Do the regridding.
+                    lonname = [c for c in da.coords if c.startswith('longitude')][0]
+                    latname = [c for c in da.coords if c.startswith('latitude')][0]
+                    if weights is None:
+                        weights_path = (self.config['weightsdir']
+                                        / weights_filename(da, zoom, lonname, latname, add_cyclic, regional))
+                        weights = xr.load_dataset(weights_path)
+                    da_hp_parts.append(regrid_da_to_healpix(da, zoom, short_name, long_name,
+                                                            weights, self.drop_vars,
+                                                            add_cyclic,
+                                                            regional, regional_chunks=chunks[-1]))
+                    del da
+                if len(da_hp_parts) == 1:
+                    da_hp = da_hp_parts[0]
+                else:
+                    time_dim = [c for c in da_hp_parts[0].dims if str(c).startswith('time')][0]
+                    da_hp = xr.concat(da_hp_parts, dim=time_dim)
+                del da_hp_parts
                 # Write this variable to the zarr store.
                 zarr_store_name = group['zarr_store']
                 url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)

@@ -28,6 +28,11 @@ MAX_NAN_FRACTION_GLOBAL = 0.50
 MAX_NAN_FRACTION_BY_VAR = {
     'mrsol': 0.80,  # soil moisture: land only
 }
+# Steps that may be missing at each end of the series: time-means are stamped at the end of their period so have
+# no first step, instantaneous fields have no last step, and the coarsen matrix drops the final step
+# (`time2d[:-1]`), so z9 and below stop one step short of z10. Missing steps *inside* the range are real gaps.
+ALLOW_EDGE_MISSING = 1
+
 # Tolerance when checking that a coarsened field equals the mean of its 4 children: |a-b| <= atol + rtol*|b|,
 # with atol a fraction of the field's own magnitude. Fields that cross zero (wa, winds) have cells whose value is
 # ~0, where a relative test alone is meaningless: float32 summation order in the coarsening then shows up as a
@@ -59,21 +64,28 @@ def written_time_steps(fs, url, var, ntime, time_chunk=1):
     return sorted(steps)
 
 
-def check_coverage(fs, url, ds):
-    """Every variable has every time step written, with no gaps."""
+def check_coverage_from_steps(steps, ntime, var='var', allow_edge_missing=ALLOW_EDGE_MISSING):
+    """Coverage verdict for one variable's written steps (separate so it can be tested without a store)."""
+    if not steps:
+        return [f'{var}: nothing written']
+    gaps = steps[-1] - steps[0] + 1 - len(steps)
+    if gaps:
+        return [f'{var}: {gaps} missing time steps inside the range {steps[0]}-{steps[-1]} '
+                f'({len(steps)}/{ntime} written)']
+    if steps[0] > allow_edge_missing or steps[-1] < ntime - 1 - allow_edge_missing:
+        return [f'{var}: written range {steps[0]}-{steps[-1]} of 0-{ntime - 1} is short by more than '
+                f'{allow_edge_missing} step(s) at an end']
+    return []
+
+
+def check_coverage(fs, url, ds, allow_edge_missing=ALLOW_EDGE_MISSING):
+    """Every variable covers the whole series, bar an allowed step at each end, with no gaps inside it."""
     failures = []
     ntime = ds.sizes['time']
     for var in sorted(v for v in ds.data_vars if 'time' in ds[v].dims):
         chunks = ds[var].encoding.get('chunks') or (1,)
         steps = written_time_steps(fs, url, var, ntime, time_chunk=chunks[0])
-        if not steps:
-            failures.append(f'{var}: nothing written')
-            continue
-        missing = ntime - len(steps)
-        gaps = steps[-1] - steps[0] + 1 - len(steps)
-        if missing:
-            failures.append(f'{var}: {len(steps)}/{ntime} time steps written '
-                            f'(first {steps[0]}, last {steps[-1]}, {gaps} internal gaps)')
+        failures += check_coverage_from_steps(steps, ntime, var=var, allow_edge_missing=allow_edge_missing)
     return failures
 
 
