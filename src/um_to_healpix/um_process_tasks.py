@@ -36,21 +36,30 @@ from loguru import logger
 from .cube_to_da_mapping import DataArrayExtractor
 from .healpix_coarsen import coarsen_healpix_zarr_region
 from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited_healpix
-from .util import async_da_to_zarr_with_retries, load_config, exception_info
+from .util import async_da_to_zarr_with_retries, load_config, exception_info, retry_on_s3_error
 
-# Super simple .s3cfg parser - must be in home directory.
-s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
 iris.FUTURE.date_microseconds = True
 
 
 def get_jasmin_s3():
     """These objects seem to go stale after a period of time - recreate when needed"""
+    # Super simple .s3cfg parser - must be in home directory.
+    s3cfg = dict([l.split(' = ') for l in (Path.home() / '.s3cfg').read_text().split('\n') if l])
     return s3fs.S3FileSystem(
         anon=False,
         secret=s3cfg['secret_key'],
         key=s3cfg['access_key'],
-        client_kwargs={'endpoint_url': 'http://hackathon-o.s3.jc.rl.ac.uk'}
+        client_kwargs={'endpoint_url': 'http://hackathon-o.s3.jc.rl.ac.uk'},
+        # Ride out short S3 wobbles inside botocore (adaptive mode also backs off when the store is loaded).
+        # Longer outages are handled a level up by util.retry_on_s3_error.
+        config_kwargs={'retries': {'max_attempts': 10, 'mode': 'adaptive'},
+                       'connect_timeout': 30, 'read_timeout': 120},
     )
+
+
+def _default_store_factory(url):
+    """Create a JASMIN S3 zarr store from a URL string."""
+    return s3fs.S3Map(root=url, s3=get_jasmin_s3(), check=False)
 
 
 def get_crs(zoom):
@@ -80,7 +89,11 @@ def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, ad
         regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay', zoom_level=zoom,
                                             add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
     else:
-        regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay_parallel', nproc=6, zoom_level=zoom,
+        # Use the CPUs the job actually asked for (SLURM_CPUS_PER_TASK), so requesting more CPUs speeds the
+        # parallel regrid up instead of leaving them idle. Falls back to 6 (the historical value) off SLURM.
+        nproc = int(os.environ.get('SLURM_CPUS_PER_TASK', 6))
+        regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay_parallel', nproc=nproc,
+                                            zoom_level=zoom,
                                             add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
 
     # These have to be dropped before you cyclic pad *some* data arrays, or you will get a coord mismatch.
@@ -94,7 +107,7 @@ def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, ad
     return da_hp
 
 
-def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=False):
+def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=False, store=None):
     """Write a healpix DataArray to the store defined by the URL."""
     name = da.name
     logger.info(f'{name} to zarr => {url}')
@@ -137,11 +150,10 @@ def healpix_da_to_zarr(da, url, group_name, group_time, regional, nan_checks=Fal
         if not regional and np.isnan(da.values).any():
             logger.warning(f'da {da.name} contains NaNs')
 
-    zarr_store = s3fs.S3Map(
-        root=url,
-        s3=get_jasmin_s3(), check=False)
+    if store is None:
+        store = _default_store_factory(url)
     # Handle errors if they arise (started happening on 26/4/25).
-    asyncio.run(async_da_to_zarr_with_retries(da, zarr_store, region))
+    asyncio.run(async_da_to_zarr_with_retries(da, store, region))
     return name
 
 
@@ -177,11 +189,12 @@ def get_regional_bounds(da):
 
 
 class UMProcessTasks:
-    def __init__(self, config, shared_metadata):
+    def __init__(self, config, shared_metadata, store_factory=None):
         self.config = config
         self.shared_metadata = shared_metadata
         self.drop_vars = config['drop_vars']
         self.groups = config['groups']
+        self._store_factory = store_factory if store_factory is not None else _default_store_factory
 
         self.debug_log = StringIO()
         logger.add(self.debug_log)
@@ -259,7 +272,10 @@ class UMProcessTasks:
         weights_path = (config['weightsdir'] /
                         weights_filename(land, config['max_zoom'],
                                          'longitude', 'latitude', add_cyclic, regional))
-        assert weights_path.exists(), f'{weights_path} does not exist'
+        if not weights_path.exists():
+            logger.info(f'No weights for orog/land-sea mask, generating: {weights_path}')
+            gen_weights(land, weights_path=weights_path, zoom=max_zoom, lonname='longitude', latname='latitude',
+                        add_cyclic=add_cyclic, regional=regional)
         weights = xr.load_dataset(weights_path)
         regridder = LatLon2HealpixRegridder(weights=weights, zoom_level=max_zoom, add_cyclic=add_cyclic,
                                             regional=regional)
@@ -357,7 +373,22 @@ class UMProcessTasks:
         da_tpl.attrs['grid_mapping'] = 'crs'
         return da_tpl
 
-    def create_empty_zarr_stores(self, task):
+    def _existing_store_urls(self):
+        """URLs of this config's zarr stores (all zooms) that already exist."""
+        existing = []
+        for zoom in range(self.config['max_zoom'], -1, -1):
+            for zarr_store_name in sorted({g['zarr_store'] for g in self.config['groups'].values()}):
+                url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
+                store = self._store_factory(url)
+                if isinstance(store, (str, Path)):
+                    exists = (Path(store) / '.zmetadata').exists()
+                else:
+                    exists = '.zmetadata' in store
+                if exists:
+                    existing.append(url)
+        return existing
+
+    def create_empty_zarr_stores(self, task, cubes=None, overwrite=False):
         """Use information in metadata to create empty zarr stores that contains all variables
 
         One zarr store per zoom, each contains all variables and their metadata/dimensions.
@@ -366,9 +397,24 @@ class UMProcessTasks:
 
         `self._create_dataarray_template` creates the dummy variables
         `self._write_zarr_store` writes the datasets to the storage backend.
+
+        Parameters:
+            task: task dict with 'inpaths' key (ignored when cubes is provided)
+            cubes: optional pre-loaded iris CubeList; if None, loaded from task['inpaths']
+            overwrite: if False (default), refuse to run if any of the stores already exist. Recreating a store
+                (mode='w') deletes all data already written to it.
         """
+        if not overwrite:
+            existing = self._existing_store_urls()
+            if existing:
+                raise FileExistsError(
+                    'Refusing to recreate existing zarr stores (this would delete all data written to them): '
+                    + ', '.join(existing) + '. Delete them first to recreate, or, if they are correct, mark this '
+                    'task as succeeded (e.g. `remake set-state <remakefile> -Q ... --success`).')
+
         inpaths = task['inpaths']
-        cubes = iris.load(inpaths)
+        if cubes is None:
+            cubes = iris.load(inpaths)
         logger.trace(cubes)
 
         regional = self.config.get('regional', False)
@@ -418,6 +464,7 @@ class UMProcessTasks:
 
             for zarr_store_name, ds_tpl in ds_tpls.items():
                 self._write_zarr_store(ds_tpl, zarr_store_name, zoom, metadata, task)
+            logger.info(f'Completed: {self.config["max_zoom"] - zoom + 1}/{self.config["max_zoom"] + 1} (zoom {zoom})')
 
     def _write_zarr_store(self, ds_tpl, zarr_store_name, zoom, metadata, task):
         """Write a zarr store for the dataset template"""
@@ -427,9 +474,7 @@ class UMProcessTasks:
         logger.info(f'Saving {task["config_key"]} zoom={zoom}')
         store_url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
 
-        zarr_store = s3fs.S3Map(
-            root=store_url,
-            s3=get_jasmin_s3(), check=False)
+        zarr_store = self._store_factory(store_url)
         logger.debug(store_url)
         logger.debug(ds_tpl)
         # For quick tests.
@@ -439,7 +484,7 @@ class UMProcessTasks:
         # Writing it after the fact is quick.
         zarr.consolidate_metadata(zarr_store)
 
-    def regrid(self, task):
+    def regrid(self, task, cubes=None):
         """Regrid all variables from lat/lon to healpix.
 
         Reads in data from UM .pp files, and outputs to the correct region of an already created zarr store.
@@ -456,20 +501,32 @@ class UMProcessTasks:
            * extract each variable and map names, attrs. Apply extra processing if nec.
            * do the regridding
            * save to zarr store
+
+        Parameters:
+            task: task dict with 'inpaths' key (ignored when cubes is provided)
+            cubes: optional pre-loaded iris CubeList; if None, loaded from task['inpaths']
         """
         inpaths = task['inpaths']
 
         logger.info('loading cubes')
         logger.trace(inpaths)
-        cubes = iris.load(inpaths)
+        if cubes is None:
+            cubes = iris.load(inpaths)
 
         add_cyclic = self.config.get('add_cyclic', True)
         regional = self.config.get('regional', False)
 
-        # These are needed by any field which needs 3D interp.
-        p = cubes.extract_cube('air_pressure')
-        z = cubes.extract_cube('geopotential_height')
+        # Only needed for model-level → pressure interpolation; absent in 2D-only configs.
+        try:
+            p = cubes.extract_cube('air_pressure')
+            z = cubes.extract_cube('geopotential_height')
+        except iris.exceptions.ConstraintMismatchError:
+            p = z = None
         extractor = DataArrayExtractor(p, z)
+
+        # Progress: one line per variable written, counted across all groups.
+        nvars = sum(len(group['name_map']) for group in self.groups.values())
+        nwritten = 0
 
         for group_name, group in self.groups.items():
             logger.info(f'processing group {group_name}')
@@ -489,22 +546,38 @@ class UMProcessTasks:
                 logger.info(msg)
                 logger.info('=' * len(msg))
                 map_item = name_map[key]
-                da = extractor.extract_da(map_item, group_cubes)
-
                 zoom = self.config['max_zoom']
-                # Do the regridding.
-                lonname = [c for c in da.coords if c.startswith('longitude')][0]
-                latname = [c for c in da.coords if c.startswith('latitude')][0]
-                weights_path = self.config['weightsdir'] / weights_filename(da, zoom, lonname, latname, add_cyclic, regional)
-                weights = xr.load_dataset(weights_path)
-                da_hp = regrid_da_to_healpix(da, zoom, short_name, long_name,
-                                             weights, self.drop_vars,
-                                             add_cyclic,
-                                             regional, regional_chunks=chunks[-1])
+
+                # Model-level variables arrive one time step at a time (their full lat/lon array is 44 GB);
+                # everything else is a single DataArray. Only the regridded healpix output accumulates.
+                weights = None
+                da_hp_parts = []
+                for da in extractor.extract_da_steps(map_item, group_cubes):
+                    # Do the regridding.
+                    lonname = [c for c in da.coords if c.startswith('longitude')][0]
+                    latname = [c for c in da.coords if c.startswith('latitude')][0]
+                    if weights is None:
+                        weights_path = (self.config['weightsdir']
+                                        / weights_filename(da, zoom, lonname, latname, add_cyclic, regional))
+                        weights = xr.load_dataset(weights_path)
+                    da_hp_parts.append(regrid_da_to_healpix(da, zoom, short_name, long_name,
+                                                            weights, self.drop_vars,
+                                                            add_cyclic,
+                                                            regional, regional_chunks=chunks[-1]))
+                    del da
+                if len(da_hp_parts) == 1:
+                    da_hp = da_hp_parts[0]
+                else:
+                    time_dim = [c for c in da_hp_parts[0].dims if str(c).startswith('time')][0]
+                    da_hp = xr.concat(da_hp_parts, dim=time_dim)
+                del da_hp_parts
                 # Write this variable to the zarr store.
                 zarr_store_name = group['zarr_store']
                 url = self.config['zarr_store_url_tpl'].format(freq=zarr_store_name, zoom=zoom)
-                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True)
+                store = self._store_factory(url)
+                healpix_da_to_zarr(da_hp, url, group_name, group_time, self.config['regional'], nan_checks=True, store=store)
+                nwritten += 1
+                logger.info(f'Completed: {nwritten}/{nvars} ({group_name}: {short_name})')
 
     def coarsen_healpix_region(self, task):
         """Coarsen the regions from source to target zooms, as defined by the task."""
@@ -522,14 +595,13 @@ class UMProcessTasks:
             z: rel_url_tpl.format(freq=freq, zoom=z)
             for z in range(11)
         }
-        jasmin_s3 = get_jasmin_s3()
-
-        src_store = s3fs.S3Map(root=urls[src_zoom], s3=jasmin_s3, check=False)
-        tgt_store = s3fs.S3Map(root=urls[tgt_zoom], s3=jasmin_s3, check=False)
+        src_store = self._store_factory(urls[src_zoom])
+        tgt_store = self._store_factory(urls[tgt_zoom])
 
         chunks = self.config['groups'][dim]['chunks']
         zarr_chunks = {'time': chunks[tgt_zoom][0], 'healpix_index': -1}
-        src_ds = xr.open_zarr(src_store, chunks=zarr_chunks)
+        src_ds = retry_on_s3_error(xr.open_zarr, src_store, chunks=zarr_chunks,
+                                   what=f'open {urls[src_zoom]}')
         regional = self.config['regional']
 
         # This will create a cluster with its specifications taken from the current machine.
@@ -543,20 +615,23 @@ class UMProcessTasks:
         logger.debug(cluster)
         logger.debug(client)
 
-        for subtask in task['tgt_times']:
+        for isubtask, subtask in enumerate(task['tgt_times']):
             subtask_log = StringIO()
             logger_id = logger.add(subtask_log)
 
             start_idx = subtask['start_idx']
             end_idx = subtask['end_idx']
-            donepath = Path(subtask['donepath'])
             logger.debug((start_idx, end_idx))
 
             coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end_idx, chunks, regional)
-            donepath.parent.mkdir(parents=True, exist_ok=True)
             logger.trace(f'completed subtask {subtask}')
-            logger.info(f'writing donepath: {donepath}')
-            donepath.write_text(subtask_log.getvalue())
+            logger.info(f'Completed: {isubtask + 1}/{len(task["tgt_times"])} (time idx {start_idx}:{end_idx})')
+            # donepath is only used by um_slurm_control; remake tracks completion itself.
+            if 'donepath' in subtask:
+                donepath = Path(subtask['donepath'])
+                donepath.parent.mkdir(parents=True, exist_ok=True)
+                logger.info(f'writing donepath: {donepath}')
+                donepath.write_text(subtask_log.getvalue())
             logger.remove(logger_id)
 
         logger.info('completed')

@@ -87,19 +87,26 @@ def calc_tgt_weights(src_ds, tgt_ds, tgt_zoom, dim):
     return tgt_weights
 
 
-def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end_idx, chunks, regional=False):
-    time_slice = slice(start_idx, end_idx)
-    src_zoom = tgt_zoom + 1
-    logger.info(f'Coarsen to {tgt_zoom}, time_slice={time_slice}')
+def _compute_coarsened(src_ds_time_slice, tgt_store, tgt_zoom, dim, chunks, regional, is_first_slice, has_src_weights):
+    """Compute coarsened dataset for one time slice. No zarr writes; reads tgt_store structure for regional.
 
+    Parameters:
+        src_ds_time_slice: already time-sliced source dataset
+        tgt_store: target zarr store (read-only, used to get regional cell structure)
+        tgt_zoom: target zoom level
+        dim: '2d' or '3d'
+        chunks: full chunk dict keyed by zoom
+        regional: whether the data is regional
+        is_first_slice: True if this is the first time chunk (start_idx == 0)
+        has_src_weights: True if the source dataset already has a 'weights' variable
+    """
+    src_zoom = tgt_zoom + 1
     tgt_chunks = chunks[tgt_zoom]
 
-    src_ds_time_slice = src_ds.isel(time=time_slice)
-    # Added to get rid of large task graph warning following Claude's advice. Didn't work.
-    # src_ds_time_slice = src_ds_time_slice.chunk({'time': -1, 'healpix_index': -1})
+    src_ds_time_slice = src_ds_time_slice.chunk({'time': -1, 'healpix_index': -1})
 
     if regional:
-        if dim == '3d' and 'weights' in src_ds.data_vars.keys():
+        if dim == '3d' and 'weights' in src_ds_time_slice.data_vars.keys():
             logger.debug('drop weights')
             src_ds_time_slice = src_ds_time_slice.drop_vars('weights')
         src_ds_time_slice = src_ds_time_slice.map(map_regional_to_global, src_zoom=src_zoom, dim=dim)
@@ -124,12 +131,30 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
         zarr_chunks = {'time': chunks[tgt_zoom][0], 'healpix_index': -1}
         tgt_ds_store = xr.open_zarr(tgt_store, chunks=zarr_chunks)
         tgt_ds = tgt_ds.map(map_global_to_regional, src_ds_time_slice=src_ds_time_slice, tgt_ds_store=tgt_ds_store, dim=dim)
-        if (src_ds_time_slice.time[0] == src_ds.time[0]) and 'weights' not in src_ds.data_vars:
-            tgt_weights = calc_tgt_weights(src_ds, tgt_ds, tgt_zoom, dim)
+        if is_first_slice and not has_src_weights:
+            tgt_weights = calc_tgt_weights(src_ds_time_slice, tgt_ds, tgt_zoom, dim)
             tgt_ds['weights'] = tgt_weights
             logger.debug(float(np.isnan(tgt_ds.weights).sum().values))
 
-    tgt_ds = tgt_ds.drop_vars('crs')
+    tgt_ds = tgt_ds.drop_vars('crs', errors='ignore')
+    return tgt_ds
+
+
+def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end_idx, chunks, regional=False):
+    time_slice = slice(start_idx, end_idx)
+    logger.info(f'Coarsen to {tgt_zoom}, time_slice={time_slice}')
+
+    tgt_chunks = chunks[tgt_zoom]
+    if dim == '2d':
+        preferred_chunks = {'time': tgt_chunks[0], 'healpix_index': tgt_chunks[1]}
+    else:
+        preferred_chunks = {'time': tgt_chunks[0], 'pressure': tgt_chunks[1], 'healpix_index': tgt_chunks[2]}
+
+    src_ds_time_slice = src_ds.isel(time=time_slice)
+    is_first_slice = (start_idx == 0)
+    has_src_weights = 'weights' in src_ds.data_vars
+
+    tgt_ds = _compute_coarsened(src_ds_time_slice, tgt_store, tgt_zoom, dim, chunks, regional, is_first_slice, has_src_weights)
 
     if dim == '2d':
         region = {'time': time_slice, 'healpix_index': slice(None)}
@@ -146,22 +171,23 @@ def coarsen_healpix_zarr_region(src_ds, tgt_store, tgt_zoom, dim, start_idx, end
         if da.name in ['orog', 'sftlf']:
             continue
         logger.debug(f'  writing {da.name}')
-        # Removed da.chunk({'healpix_index': preferred_chunks['healpix_index']}) in each call to
-        # async_da_to_zarr_with_retries following Claude's advice in order to remove warning about large task graph.
         if da.name == 'weights':
-            if src_ds_time_slice.time[0] == src_ds.time[0]:
+            if is_first_slice:
                 if dim == '2d':
                     wregion = {'healpix_index': slice(None)}
                     asyncio.run(
-                        async_da_to_zarr_with_retries(da, tgt_store, wregion))
+                        async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, wregion))
                 elif dim == '3d':
                     # TODO: still causes error due to dims mismatch.
                     logger.warning('Not writing weights for 3D data')
+                    # region = {'pressure': slice(None), 'healpix_index': slice(None)}
+                    # asyncio.run(
+                    #     async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))
             continue
         if da.name == 'mrsol':
             dregion = {'time': time_slice, 'depth': slice(None), 'healpix_index': slice(None)}
             asyncio.run(
-                async_da_to_zarr_with_retries(da, tgt_store, dregion))
+                async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, dregion))
         else:
             asyncio.run(
-                async_da_to_zarr_with_retries(da, tgt_store, region))
+                async_da_to_zarr_with_retries(da.chunk({'healpix_index': preferred_chunks['healpix_index']}), tgt_store, region))

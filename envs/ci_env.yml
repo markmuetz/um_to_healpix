@@ -1,0 +1,36 @@
+# Lean environment for CI — only what the test suite requires.
+# Dev tools (jupyter, matplotlib, esmf, etc.) are intentionally excluded.
+name: um2hp_env
+channels:
+  - conda-forge
+  - nodefaults
+dependencies:
+  - python=3.12
+  # Atmospheric science / iris stack
+  - iris
+  - cf-units
+  - cf_xarray
+  - mo_pack
+  - python-stratify
+  # Array / data
+  - numpy
+  - pandas
+  - scipy
+  - xarray
+  - dask
+  - distributed    # dask.distributed is imported at module level in um_process_tasks
+  - zarr
+  # Remote storage
+  - s3fs
+  - botocore
+  - aiohttp
+  # Mapping
+  - cartopy
+  # HEALPix
+  - healpy
+  - healpix        # provides 'import healpix as hp'
+  # Utilities
+  - joblib
+  - loguru
+  - pip
+  - easygems=0.0.14  # 0.1.x breaks compute_weights_delaunay for exact ±90° latitudes

@@ -1,0 +1,56 @@
+name: Tests
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    branches:
+      - main
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    defaults:
+      run:
+        shell: bash -el {0}
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up conda base
+        uses: conda-incubator/setup-miniconda@v3
+        with:
+          miniforge-variant: Miniforge3
+          use-mamba: true
+          conda-remove-defaults: true
+
+      - name: Cache conda environment
+        id: cache-env
+        uses: actions/cache@v4
+        with:
+          path: ${{ env.CONDA }}/envs/um2hp_env
+          key: conda-${{ runner.os }}-${{ hashFiles('envs/ci_env.yml') }}
+
+      - name: Create conda environment
+        if: steps.cache-env.outputs.cache-hit != 'true'
+        run: mamba env create -f envs/ci_env.yml
+
+      - name: Add environment to PATH
+        run: echo "$CONDA/envs/um2hp_env/bin" >> $GITHUB_PATH
+
+      - name: Install package
+        run: pip install -e ".[test]"
+
+      - name: Run tests
+        run: pytest tests/ -v --tb=short --junit-xml=test-results.xml --cov --cov-report=term-missing --cov-report=xml:coverage.xml
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-results
+          path: |
+            test-results.xml
+            coverage.xml

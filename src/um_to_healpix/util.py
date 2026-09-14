@@ -4,13 +4,14 @@ from functools import partial
 import asyncio
 import random
 import subprocess as sp
+import time
+from contextlib import contextmanager
 from pathlib import Path
 
 import botocore.exceptions
 import iris
 import xarray as xr
 from easygems import healpix as egh
-from iris.experimental.stratify import relevel
 from loguru import logger
 import numpy as np
 import stratify
@@ -34,6 +35,39 @@ import stratify
 #             logger.warning(f'sleeping for {timeout} s')
 #             await asyncio.sleep(timeout)
 #     raise Exception(f'failed to open {url} after {retries} retries')
+
+
+def retry_on_s3_error(fn, *args, what='S3 operation', max_retries=6, base_sleep=30, **kwargs):
+    """Call fn(*args, **kwargs), retrying S3/network failures with a growing sleep.
+
+    Reads and store-opens had no retries, so a momentary failure killed the task: the 2026-09-13 outages
+    (10 and 16 min) cost 38 coarsen batches this way. The default schedule (30, 60, 120, 240, 480 s + jitter,
+    ~15 min total) rides out an outage of that length. Writes have their own retries in
+    async_da_to_zarr_with_retries.
+    """
+    for attempt in range(max_retries):
+        try:
+            return fn(*args, **kwargs)
+        except (botocore.exceptions.ClientError, botocore.exceptions.ConnectionError,
+                botocore.exceptions.HTTPClientError, OSError) as e:
+            if attempt == max_retries - 1:
+                raise
+            timeout = max(0.0, base_sleep * 2 ** attempt + random.uniform(-5, 5))
+            logger.warning(f'{what} failed ({type(e).__name__}: {str(e)[:120]}); '
+                           f'retry {attempt + 1}/{max_retries - 1} in {timeout:.0f}s')
+            time.sleep(timeout)
+
+
+@contextmanager
+def task_log(path, level='DEBUG'):
+    """Also write loguru output to a human-readable per-task log file (appended to, one file per task)."""
+    path = Path(path)
+    path.parent.mkdir(parents=True, exist_ok=True)
+    sink_id = logger.add(path, level=level, mode='a')
+    try:
+        yield path
+    finally:
+        logger.remove(sink_id)
 
 
 async def async_da_to_zarr_with_retries(da, store, region, max_retries=5):
@@ -63,32 +97,69 @@ async def async_da_to_zarr_with_retries(da, store, region, max_retries=5):
         raise Exception(f'failed to write {da.name} to zarr store {store} after {retries} retries')
 
 
-def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True):
+def _interp_columns(tgt_levels, src_data, cube_data, nproc):
+    """stratify.interpolate over axis 0, optionally splitting the last axis across processes.
+
+    stratify holds the GIL (6 threads measure 0.38x, i.e. slower than serial), so threads are useless here and
+    only processes help (6 processes: 4.6x). Interpolation is independent per column, so splitting the trailing
+    axis is exact: each worker sees whole columns and the pieces concatenate back with no overlap.
+    """
+    interpolate = partial(stratify.interpolate,
+                          interpolation=stratify.INTERPOLATE_LINEAR,
+                          extrapolation=stratify.EXTRAPOLATE_LINEAR,
+                          rising=False)
+    if nproc <= 1:
+        return interpolate(tgt_levels, src_data, cube_data, axis=0)
+
+    from joblib import Parallel, delayed
+    bounds = np.linspace(0, cube_data.shape[-1], nproc + 1).astype(int)
+    slices = [(lo, hi) for lo, hi in zip(bounds[:-1], bounds[1:]) if hi > lo]
+    parts = Parallel(n_jobs=len(slices), backend='loky')(
+        delayed(interpolate)(tgt_levels, src_data[..., lo:hi], cube_data[..., lo:hi], axis=0)
+        for lo, hi in slices)
+    return np.concatenate(parts, axis=-1)
+
+
+def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True, time_indices=None, dtype=np.float32,
+                            nproc=1):
+    """Interpolate a model-level cube onto pressure levels.
+
+    time_indices selects which time steps to do (default: all). Doing one step at a time keeps the output array
+    small: the full (12, 25, 3841, 5120) array is 44 GB in float64 and was the main reason a regrid task peaked at
+    ~95 GB. dtype float32 matches the zarr stores the result is written to (float64 precision is discarded there).
+
+    nproc > 1 splits each time step's columns across processes. This is the dominant cost of a regrid task (the 5
+    model-level variables are 74% of compute, and a task uses only 1.31 of its 6 cores), so it is the main lever
+    on regrid throughput. See docs/p4k_production_run_plan_2026-09-11.md item 8.
+    """
     logger.debug(f're-level model level to pressure for {cube.name()}')
     cube = cube[-p.shape[0]:]
     assert (p.coord('time').points == cube.coord('time').points).all()
+    if time_indices is None:
+        time_indices = range(cube.shape[0])
+    time_indices = list(time_indices)
 
     # Direction of pressure_levels must match that of air_pressure/p.
     # This runs, but it also inverts the 3D fields! Fix by inverting output.
     pressure_levels = z.coord('pressure').points[::-1] * 100  # convert from hPa to Pa.
-    interpolator = partial(stratify.interpolate,
-                           interpolation=stratify.INTERPOLATE_LINEAR,
-                           extrapolation=stratify.EXTRAPOLATE_LINEAR,
-                           rising=False)
-    new_cube_data = np.zeros((cube.shape[0], len(pressure_levels), cube.shape[2], cube.shape[3]))
-    for i in range(cube.shape[0]):
+    new_cube_data = np.zeros((len(time_indices), len(pressure_levels), cube.shape[2], cube.shape[3]), dtype=dtype)
+    for out_i, i in enumerate(time_indices):
         logger.trace(i)
-        regridded_cube = relevel(cube[i], p[i], pressure_levels, interpolator=interpolator)
-        # logger.trace(f'regridded_cube.data.sum() {regridded_cube.data.sum()}')
+        # What iris.experimental.stratify.relevel does, minus building an intermediate cube: broadcast the source
+        # levels against the data and interpolate over axis 0.
+        cube_data, src_data = np.broadcast_arrays(cube[i].data, p[i].data)
+        step = _interp_columns(pressure_levels, src_data, cube_data, nproc)
         # Fix 3D fields so that they are the right way round - invert output.
-        new_cube_data[i] = regridded_cube.data[::-1]
+        new_cube_data[out_i] = step[::-1]
+        del step, cube_data, src_data
 
     if enforce_greater_than_zero:
         # Some values are ending up as negatives (why? Perhaps due to linear extrap. outside domain?)
         # Enfore greater than zero if so (these are all for mass_ fields - must by >= 0).
         new_cube_data[new_cube_data < 0] = 0
 
-    coords = [(cube.coord('time'), 0), (z.coord('pressure'), 1), (z.coord('latitude'), 2),
+    time_coord = cube[time_indices].coord('time') if len(time_indices) < cube.shape[0] else cube.coord('time')
+    coords = [(time_coord, 0), (z.coord('pressure'), 1), (z.coord('latitude'), 2),
               (z.coord('longitude'), 3)]
     new_cube = iris.cube.Cube(new_cube_data,
                               long_name=cube.name(),

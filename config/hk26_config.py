@@ -17,7 +17,7 @@ from um_to_healpix.util import has_dimensions, cube_cell_method_is_not_empty, cu
 output_vn = 'v7'
 deploy = 'prod'
 # Location of input files.
-dy3dir = Path('/gws/nopw/j04/kscale/DYAMOND3_reruns/')
+dy3dir = Path('/gws/ssde/j25b/kscale/DYAMOND3_reruns/')
 dy3dir_scratch = Path('/work/scratch-pw5/rwjones/kscale/DYAMOND3_reruns/')
 # hrcm GWS not available.
 # weightsdir = Path('/gws/nopw/j04/hrcm/mmuetz/weights/')
@@ -26,6 +26,15 @@ dy3dir_scratch = Path('/work/scratch-pw5/rwjones/kscale/DYAMOND3_reruns/')
 weightsdir = Path('/work/scratch-nopw2/mmuetz/weightsdir')
 # Location of donefiles. Delete to rerun a particular task.
 donedir = Path(f'/work/scratch-nopw2/mmuetz/donedir/{deploy}')
+# remake pipelines: human-readable per-task logs, and the .pp file index written at plan time
+# (read by SLURM array elements instead of rescanning the input dirs). On scratch, not home (quota).
+logdir = Path(f'/work/scratch-nopw2/mmuetz/um2hp/logs/{deploy}/{output_vn}')
+pp_indexdir = Path('/work/scratch-nopw2/mmuetz/um2hp/pp_index')
+
+# Sims processed by the remake pipelines (remakefile_regrid.py/remakefile_coarsen.py); the others were
+# processed by um_slurm_control.py. Restricting this keeps plans fast and stops an unqueried `remake run`
+# from touching other sims' outputs.
+remake_config_keys = ['glm.n2560_RAL3p3_tuned_p4k']
 
 # Defaults - can be overridden.
 slurm_config = dict(
@@ -37,6 +46,10 @@ slurm_config = dict(
     time='10:00:00',
     mem=100000,
     nconcurrent_tasks=60,
+    # Nodes to avoid (remake pipelines: passed as #SBATCH --exclude). Comma-separated, '' for none.
+    # host1114, host1240: regrid ran ~3-5x slower than other nodes (2026-09-11).
+    # host1239: ~20x slower, not load-related (2026-09-11 p4k run).
+    exclude='host1114,host1240,host1239',
 )
 
 shared_metadata = {
@@ -333,7 +346,7 @@ for key in global_sim_keys:
     else:
         group3d_ml_global_map[key] = group3d_ml
 
-orig_base_dir = Path('/gws/nopw/j04/kscale/DYAMOND3_data/')
+orig_base_dir = Path('/gws/ssde/j25b/kscale/DYAMOND3_data/')
 orog_land_sea = {
     # NOTE, THIS USES THE ORIGINAL DYMOND 3 DATA.
     'glm.n2560_RAL3p3.tuned': orig_base_dir / '5km-RAL3/glm/field.pp/apa.pp/glm.n2560_RAL3p3.apa_20200120T00.pp',
@@ -382,6 +395,26 @@ global_configs['glm.n2560_RAL3p3.tuned']['metadata'].update({
                                'and this science configuration has been developed and evaluated targetting '
                                'high-resolution (regional) simulations.'),
 })
+
+# +4K SST perturbation of glm.n2560_RAL3p3.tuned: same grid, streams and orography,
+# different input location/layout (glm/apver*/*.pp, no field.pp/ dir).
+p4k_key = 'glm.n2560_RAL3p3_tuned_p4k'
+global_configs[p4k_key] = {
+    **global_configs['glm.n2560_RAL3p3.tuned'],
+    'name': p4k_key,
+    'basedir': Path('/work/scratch-pw6/cscullio/data/DYAMOND3/n2560_RAL3p3_tuned_p4k/glm'),
+    'pp_glob': 'apve*/*.pp',
+    'donepath_tpl': f'{p4k_key}/{output_vn}/{{task}}_{{date}}.done',
+    'coarsen_donepath_tpl': f'{p4k_key}/{output_vn}/coarsen/{{dim}}/z{{zoom}}/{{job_id}}.done',
+    'zarr_store_url_tpl': f's3://sim-data/{deploy}/{output_vn}/{p4k_key}/um.{{freq}}.hp_z{{zoom}}.zarr',
+    'metadata': {
+        'simulation': p4k_key,
+        'simulation_description': (
+            global_configs['glm.n2560_RAL3p3.tuned']['metadata']['simulation_description'] +
+            ' This simulation is identical to glm.n2560_RAL3p3.tuned except that sea surface temperatures are '
+            'uniformly increased by 4 K (+4K SST perturbation experiment).'),
+    },
+}
 
 
 regional_sim_keys = {
