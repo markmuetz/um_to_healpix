@@ -460,6 +460,33 @@ and the task to **~27 min (~1.4x)**; at `nproc=8`, ~25.6 min (~1.5x). Worthwhile
 increase on a task that already peaks at 60.1 GB against a 96 GB request, so it likely fits — but the sweep
 conflates all `nproc` values in one process, so **re-measure a real regrid task before changing the request**.
 
+### End-to-end on a real task (job 51991137, tuned control, 2026-09-14)
+
+`DataArrayExtractor` now takes `nproc` (default `SLURM_CPUS_PER_TASK`) and passes it down. Full regrid of
+2020-01-21 00:00 for `glm.n2560_RAL3p3.tuned` into the `dev_remake` stores — real `.pp` input, all 39 variables,
+real S3 writes — sweeping `nproc` **sequentially on one node with one date**, because the p4k run showed other
+users' load swings task time by 3-6x and would otherwise dominate the signal.
+
+| nproc | Minutes | Speed-up |
+|---|---|---|
+| 1 | 31.69 | 1.00x |
+| 4 | 20.34 | 1.56x |
+| 8 | 17.57 | **1.80x** |
+
+Baseline peak was 59.7 GB, matching the 60.1 GB measured independently in item 3 on another date.
+
+**Memory, measured properly.** `resource.getrusage(RUSAGE_CHILDREN)` is useless here: it counts only children
+that have been *waited for*, and loky keeps a reusable pool alive, so it reads 0.0 until the pool is torn down and
+then reports 59.7 GB — a worker's copy-on-write inherited address space, not memory it owns. The cgroup figure is
+the one to trust: **sacct MaxRSS 63.3 GB vs 59.7 GB for the parent alone, so workers cost ~3.6 GB (+6%)**. That
+fits the current 96 GB request comfortably; the request does not need to change.
+
+**Caveat — iteration order is confounded with `nproc`.** Each iteration rewrites the same chunks the previous one
+created, and the observed gains exceed what the synthetic curve predicts: `nproc=8` implies the parallelised part
+is ~75% of the task, `nproc=4` implies ~90%, and the production logs say 57%. Those cannot all be right. A
+reversed-order control (job 52007902, `EXPT_NPROCS=8,4,1`) is the check; treat the table above as provisional
+until it agrees.
+
 Tested and rejected: batching all 5 model-level variables into one `stratify` call sharing a single `z_src` (its
 docstring permits extra leading dimensions on `fz_src`). Measured **0.58x** — stratify does not amortise the
 level search across variables, and the memory layout hurts.
