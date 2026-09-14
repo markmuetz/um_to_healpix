@@ -14,7 +14,14 @@ class DataArrayExtractor:
         self.z = z
         # Vertical interpolation is the dominant cost of a regrid task and is GIL-bound, so it needs processes,
         # not the threads the regrid itself uses. Default to the CPUs the job asked for.
-        self.nproc = nproc if nproc is not None else int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
+        #
+        # UM2HP_INTERP_NPROC overrides it independently of SLURM_CPUS_PER_TASK. Both knobs read the same variable
+        # otherwise, so a sweep of SLURM_CPUS_PER_TASK moves the threaded regrid (all 39 variables) at the same
+        # time as this, and cannot attribute the difference to either. Keep them separable for measurement, and
+        # in case processes (memory-hungry) and threads (not) ever want different values.
+        if nproc is None:
+            nproc = os.environ.get('UM2HP_INTERP_NPROC') or os.environ.get('SLURM_CPUS_PER_TASK', 1)
+        self.nproc = int(nproc)
 
     @staticmethod
     def extract_cubes(map_item, group_cubes):

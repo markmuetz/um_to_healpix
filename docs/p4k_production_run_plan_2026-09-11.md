@@ -481,11 +481,36 @@ then reports 59.7 GB — a worker's copy-on-write inherited address space, not m
 the one to trust: **sacct MaxRSS 63.3 GB vs 59.7 GB for the parent alone, so workers cost ~3.6 GB (+6%)**. That
 fits the current 96 GB request comfortably; the request does not need to change.
 
-**Caveat — iteration order is confounded with `nproc`.** Each iteration rewrites the same chunks the previous one
-created, and the observed gains exceed what the synthetic curve predicts: `nproc=8` implies the parallelised part
-is ~75% of the task, `nproc=4` implies ~90%, and the production logs say 57%. Those cannot all be right. A
-reversed-order control (job 52007902, `EXPT_NPROCS=8,4,1`) is the check; treat the table above as provisional
-until it agrees.
+**What the sweep does and does not show.** `SLURM_CPUS_PER_TASK` drives *two* things: this new process-parallel
+interpolation, and the pre-existing threaded regrid of all 39 variables (which already scales ~4.2x). So the
+table is an honest cores-vs-wall-time curve for the whole task, but it is **not** attributable to the vertical
+interpolation alone — `nproc=1` also throttled the threaded regrid from 6 threads to 1, so it is not the
+production baseline. `DataArrayExtractor` now honours `UM2HP_INTERP_NPROC` to separate the two knobs if a future
+sweep needs to.
+
+### Conclusion: keep `cpus-per-task` at 6
+
+Fitting Amdahl's law to the two points gives a consistent parallel fraction — `f = 0.48` from `nproc=4`,
+`f = 0.51` from `nproc=8` — so **about half the task is parallelisable and the ceiling is 2.0x at infinite cores**:
+
+| Cores | Speed-up | vs previous |
+|---|---|---|
+| 4 | 1.56x (measured) | — |
+| **6** | **1.71x (predicted)** | +10% |
+| 8 | 1.80x (measured) | +5% |
+| 12 | 1.85x (predicted) | +3% |
+
+6 cores captures 85% of the theoretical maximum and **needs no resource change at all**: the request is already
+6 and only 1.31 were being used, so enabling the interpolation parallelism harvests cores already being paid for.
+
+Cores look free beyond that — memory caps packing at ~16 tasks per 1.5 TB node, using only 96 of 192 cores at 6
+each — but resist it. Nodes running 8+ of our tasks averaged 104 min against 60 min for 3-4 *already at 6
+threads* (see the packing table above), and the vertical interpolation is memory-bandwidth bound: 16 tasks each
+spawning 8 workers is 128 processes per node. The marginal 5% from 8 cores is well inside the range where that
+contention could turn negative.
+
+**The next gain is not more cores.** The other half of the fit is the serial remainder: S3 writes (18% of the
+task), `.pp` loading (5%), and the un-parallelised parts of the regrid loop.
 
 Tested and rejected: batching all 5 model-level variables into one `stratify` call sharing a single `z_src` (its
 docstring permits extra leading dimensions on `fz_src`). Measured **0.58x** — stratify does not amortise the
