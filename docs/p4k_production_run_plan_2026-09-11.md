@@ -338,7 +338,58 @@ Agreed design (2026-09-13), to run **after** the whole coarsen chain:
 - `--exclusive=user` would insulate tasks from other users' load, at the cost of idle cores; worth testing if
   regrid's memory footprint cannot be reduced.
 - Housekeeping: the `dev_remake` test stores for the tuned sim (22 stores, Jan 20–31 2020) are still on S3 and can
-  be deleted once nobody needs the comparison.
+  be deleted once nobody needs the comparison. Note item 7 below wants to write into exactly these stores, so
+  hold off until that comparison is done.
+- The `.pp` source for p4k (`/work/scratch-pw6/cscullio/.../n2560_RAL3p3_tuned_p4k`, **43 TB**) must *not* be
+  deleted: it is owned by cscullio (not writable by us), and the zarr output is lossy relative to it — `apvere`
+  (406 files) is never read, only 39 variables are extracted, and z10 (12.6M cells) is coarser than the N2560
+  grid (19.7M points). Deleting it would make the run unreproducible and block item 7. If space is the concern,
+  the answer is archiving to tape/GWS, not deletion — scratch is not backed up.
+
+## 7. Conservative regridding via grid-doctor (future)
+
+**Why.** The current regrid is easygems Delaunay barycentric interpolation, which is *not conservative*: domain
+means of precipitation and radiative fluxes are not preserved from the N2560 source to z10. Users of this dataset
+will compute exactly those integrals. [grid-doctor](https://github.com/freva-org/grid-doctor) (DKRZ/freva, BSD)
+wraps ESMF and offers `method="conservative"` as well as `"nearest"`.
+
+**Plan: add it as an option first**, so the two can be compared like for like on the same dates. We are not
+looking for bit correspondence — a close match (low RMSE, high correlation) is the acceptance bar, with the
+conservative path expected to *differ deliberately* on integral quantities.
+
+The seam is narrow, since both are compute-weights-once/apply-many:
+
+| ours | grid-doctor |
+|---|---|
+| `gen_weights(da, weights_path, zoom, ...)` | `compute_healpix_weights(ds, level, method=...) -> Path` |
+| `LatLon2HealpixRegridder.regrid(da, lonname, latname)` | `apply_weight_file(ds, weights_path, missing_policy=...)` |
+
+A `regrid_method` config key behind `regrid_da_to_healpix()` plus the two `gen_weights` call sites
+(`um_process_tasks.py:277`, `:330`) is essentially the whole change.
+
+Feasibility is good: `ESMF_RegridWeightGen`, `mpirun` and `esmpy` 8.9.1 are **already in the pixi env**, so the
+offline MPI weight-generation path (better suited to a SLURM job than the in-memory one) needs no new system
+dependencies. Only `grid_doctor` and its dep `healpix-geo` are missing.
+
+Things that will bite, in order:
+
+1. `weights_filename()` (`um_process_tasks.py:160`) has no method component, so the two weight sets would collide
+   at the same path. This is the prerequisite for any comparison.
+2. `missing_policy` (`renormalize` vs `propagate`) changes coastline NaN behaviour, which feeds straight into
+   `checks.py`'s `MAX_NAN_FRACTION_BY_VAR` and `ALLOW_EDGE_MISSING`. Without per-method thresholds a methodology
+   change reads as a regression.
+3. Dim naming: ours emits `healpix_index`, grid-doctor uses `cell` (the same mismatch that hit `attach_coords` in
+   the plotting rule). Rename to keep the stores drop-in compatible.
+4. `add_cyclic` should be **off** for the grid-doctor path: `_xr_add_cyclic_point` and the `hp_lon[hp_lon==0]=360`
+   hack exist only because Delaunay needs the source convex hull to cover the target. ESMF handles periodicity
+   natively, so this is a real simplification rather than a porting detail.
+
+**Cheapest first experiment**, using tooling that already exists: regrid one date both ways into the `dev_remake`
+stores (the path used for the memory measurement in item 3), then compare with `scripts/compare_stores.py
+--b-key`. Roughly 30 minutes of compute, before committing to any refactor.
+
+**Caution:** grid-doctor's own README calls it "a scripting solution for a proof of concept" and it is classified
+Alpha, so pin a git rev rather than tracking `main`.
 
 ## Operational notes (worked well, keep)
 
