@@ -12,7 +12,6 @@ import botocore.exceptions
 import iris
 import xarray as xr
 from easygems import healpix as egh
-from iris.experimental.stratify import relevel
 from loguru import logger
 import numpy as np
 import stratify
@@ -98,12 +97,40 @@ async def async_da_to_zarr_with_retries(da, store, region, max_retries=5):
         raise Exception(f'failed to write {da.name} to zarr store {store} after {retries} retries')
 
 
-def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True, time_indices=None, dtype=np.float32):
+def _interp_columns(tgt_levels, src_data, cube_data, nproc):
+    """stratify.interpolate over axis 0, optionally splitting the last axis across processes.
+
+    stratify holds the GIL (6 threads measure 0.38x, i.e. slower than serial), so threads are useless here and
+    only processes help (6 processes: 4.6x). Interpolation is independent per column, so splitting the trailing
+    axis is exact: each worker sees whole columns and the pieces concatenate back with no overlap.
+    """
+    interpolate = partial(stratify.interpolate,
+                          interpolation=stratify.INTERPOLATE_LINEAR,
+                          extrapolation=stratify.EXTRAPOLATE_LINEAR,
+                          rising=False)
+    if nproc <= 1:
+        return interpolate(tgt_levels, src_data, cube_data, axis=0)
+
+    from joblib import Parallel, delayed
+    bounds = np.linspace(0, cube_data.shape[-1], nproc + 1).astype(int)
+    slices = [(lo, hi) for lo, hi in zip(bounds[:-1], bounds[1:]) if hi > lo]
+    parts = Parallel(n_jobs=len(slices), backend='loky')(
+        delayed(interpolate)(tgt_levels, src_data[..., lo:hi], cube_data[..., lo:hi], axis=0)
+        for lo, hi in slices)
+    return np.concatenate(parts, axis=-1)
+
+
+def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True, time_indices=None, dtype=np.float32,
+                            nproc=1):
     """Interpolate a model-level cube onto pressure levels.
 
     time_indices selects which time steps to do (default: all). Doing one step at a time keeps the output array
     small: the full (12, 25, 3841, 5120) array is 44 GB in float64 and was the main reason a regrid task peaked at
     ~95 GB. dtype float32 matches the zarr stores the result is written to (float64 precision is discarded there).
+
+    nproc > 1 splits each time step's columns across processes. This is the dominant cost of a regrid task (the 5
+    model-level variables are 74% of compute, and a task uses only 1.31 of its 6 cores), so it is the main lever
+    on regrid throughput. See docs/p4k_production_run_plan_2026-09-11.md item 8.
     """
     logger.debug(f're-level model level to pressure for {cube.name()}')
     cube = cube[-p.shape[0]:]
@@ -115,18 +142,16 @@ def model_level_to_pressure(cube, p, z, enforce_greater_than_zero=True, time_ind
     # Direction of pressure_levels must match that of air_pressure/p.
     # This runs, but it also inverts the 3D fields! Fix by inverting output.
     pressure_levels = z.coord('pressure').points[::-1] * 100  # convert from hPa to Pa.
-    interpolator = partial(stratify.interpolate,
-                           interpolation=stratify.INTERPOLATE_LINEAR,
-                           extrapolation=stratify.EXTRAPOLATE_LINEAR,
-                           rising=False)
     new_cube_data = np.zeros((len(time_indices), len(pressure_levels), cube.shape[2], cube.shape[3]), dtype=dtype)
     for out_i, i in enumerate(time_indices):
         logger.trace(i)
-        regridded_cube = relevel(cube[i], p[i], pressure_levels, interpolator=interpolator)
-        # logger.trace(f'regridded_cube.data.sum() {regridded_cube.data.sum()}')
+        # What iris.experimental.stratify.relevel does, minus building an intermediate cube: broadcast the source
+        # levels against the data and interpolate over axis 0.
+        cube_data, src_data = np.broadcast_arrays(cube[i].data, p[i].data)
+        step = _interp_columns(pressure_levels, src_data, cube_data, nproc)
         # Fix 3D fields so that they are the right way round - invert output.
-        new_cube_data[out_i] = regridded_cube.data[::-1]
-        del regridded_cube
+        new_cube_data[out_i] = step[::-1]
+        del step, cube_data, src_data
 
     if enforce_greater_than_zero:
         # Some values are ending up as negatives (why? Perhaps due to linear extrap. outside domain?)

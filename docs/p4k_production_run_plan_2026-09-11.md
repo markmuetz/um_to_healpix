@@ -396,6 +396,100 @@ reprocessing what has already been published.
 **Caution:** grid-doctor's own README calls it "a scripting solution for a proof of concept" and it is classified
 Alpha, so pin a git rev rather than tracking `main`.
 
+## 8. Parallelise the vertical interpolation (regrid is 22% CPU-efficient)
+
+Investigated 2026-09-14 after asking whether the task structure (one task per `.pp` date, all variables) could be
+made more efficient. Short answer: the structure is right, but three quarters of the compute runs single-threaded
+inside a GIL-bound library while five of the six requested cores idle.
+
+### Where the time goes
+
+Phase breakdown from 240 healthy regrid logs (thrashed tasks over 90 min excluded):
+
+| Phase | Mean | Share of task |
+|---|---|---|
+| Load `.pp` cubes | 2.0 min | 5.3% |
+| Regrid compute | 29.6 min | **76.9%** |
+| S3 write | 6.9 min | 17.8% |
+| Total task | 38.5 min | |
+
+Within compute, the **5 model-level variables are 74%** (21.8 of 29.6 min): `cli` 286 s, `clw` 263 s, `qg` 262 s,
+`qr` 261 s, `qs` 240 s per task, against 4–5 s for a cheap 2D field such as `pr`. That is
+`model_level_to_pressure` (stratify, onto 25 pressure levels), not the regridding.
+
+Measured CPU efficiency over all 809 completed regrid tasks: **1.31 of 6 cores (22%)**.
+
+### Why more CPUs would not have helped
+
+| Workload | 6 threads | 6 processes |
+|---|---|---|
+| `egr.apply_weights` (the regrid) | **4.23x** | — |
+| `stratify.interpolate` (vertical interp) | **0.38x** (slower than serial) | **4.61x** |
+
+The existing threaded regrid is sound — it is pure numpy and does release the GIL, as the comment in
+`_regrid_easygems_delaunay_parallel` claims. `stratify` holds the GIL, so running it under threads is *worse*
+than serial; it is currently not parallelised at all. The fix is process parallelism over the column axis in
+`model_level_to_pressure`, where joblib auto-memmaps the large arrays.
+
+### Prototype, measured at production scale (job 51976402, 2026-09-14)
+
+`model_level_to_pressure` gained an `nproc` argument (default 1, so no behaviour change until switched on) and
+`_interp_columns`, which splits the trailing axis across `loky` processes. Output is **bit-identical** to the old
+`relevel` path at `nproc` 1 and 3 — a pure scheduling change, not a numerical one.
+
+One time step at the true `(70, 3841, 5120) -> (25, 3841, 5120)` shape, 8 CPUs:
+
+| nproc | Time | Speed-up |
+|---|---|---|
+| 1 | 77.7 s | 1.00x |
+| 2 | 74.4 s | 1.04x |
+| 4 | 46.6 s | 1.67x |
+| 6 | 36.7 s | **2.12x** |
+| 8 | 31.8 s | 2.44x |
+
+**The microbenchmark overpromised**: 4.6x on 400k columns became 2.12x at 6 processes on the real 19.7M-column
+step, because each step must ship ~10 GB (the model-level data plus the pressure field) to the workers. `nproc=2`
+is worth almost nothing (1.04x) — the transfer is a largely fixed cost that only pays off once enough workers
+share it. Scaling is still improving at 8, so the right value is probably the CPU count, not 6.
+
+Revised effect: the 5 model-level variables are ~21.8 min of a 38.5 min task, so 2.12x takes that to ~10.3 min
+and the task to **~27 min (~1.4x)**; at `nproc=8`, ~25.6 min (~1.5x). Worthwhile, but not the 1.6x first estimated.
+
+**Memory:** the benchmark's whole cgroup peaked at 59.6 GB (sacct) against 51.9 GB for the parent alone
+(`ru_maxrss`, which excludes children), so workers added roughly 8 GB across the sweep. That is a real but modest
+increase on a task that already peaks at 60.1 GB against a 96 GB request, so it likely fits — but the sweep
+conflates all `nproc` values in one process, so **re-measure a real regrid task before changing the request**.
+
+Tested and rejected: batching all 5 model-level variables into one `stratify` call sharing a single `z_src` (its
+docstring permits extra leading dimensions on `fz_src`). Measured **0.58x** — stratify does not amortise the
+level search across variables, and the memory layout hurts.
+
+### Why not one variable at a time
+
+Variable-major tasks would open each date's `.pp` files once per variable instead of once in total, multiplying a
+cost that is currently ~27 h aggregate by ~39. The 5.3% load share is what the date-major decomposition buys, and
+it is the right trade.
+
+### Why the z10 time chunk must stay 1
+
+The actual write blocks are `idx = 1, 13, 25, ...` (2d, 12 steps per task) and `idx = 0, 5, 9, 13, ...` (3d, 4 per
+task): the store's time axis starts at 00:00 but the 00Z file's first instantaneous field is 01:00, so every block
+is offset by one. Alignment needs every block start `≡ 0 (mod C)`; `start = 1` forces `C | 1`, so **C = 1 is the
+only aligned chunk size** — not merely "12 would also work". With `C > 1`:
+
+1. `to_zarr(region=...)` (`um_process_tasks.py:137`) gets a numpy-backed (not dask) array, so there is no
+   `safe_chunks` guard to refuse the unaligned region; zarr read-modify-writes the straddled chunk.
+2. Two concurrently running tasks both touch the shared boundary chunk; the second write silently discards the
+   first half. No error, no retry.
+3. **`checks.written_time_steps` would not catch it**: it counts chunk *keys* and expands by the time-chunk
+   factor, so a half-written chunk reads as complete coverage. Same class of bug as 2b5c0ce.
+
+Plus read-modify-write amplification: a `(12, 1048576)` float32 chunk is ~50 MB, so a task would move ~100 MB to
+deposit 48 MB. To allow `C > 1` at z10 you would have to make each task own whole chunks — shift the time origin
+to 01:00, or decompose tasks by chunk rather than by `.pp` date. Not worth it while `C = 1` costs nothing at z10.
+Coarsening is where multi-time chunks are real, and it is already handled: `_batch_len = NBATCH * chunks[zoom][0]`
+with an assert that batches start on a boundary (`remakefile_coarsen.py:93,161`).
+
 ## Operational notes (worked well, keep)
 
 - A running array's settings can be changed without resubmitting: `scontrol update JobId=<id>
