@@ -36,7 +36,7 @@ from loguru import logger
 from .cube_to_da_mapping import DataArrayExtractor
 from .healpix_coarsen import coarsen_healpix_zarr_region
 from .latlon_to_healpix import LatLon2HealpixRegridder, gen_weights, get_limited_healpix
-from .util import async_da_to_zarr_with_retries, load_config, exception_info
+from .util import async_da_to_zarr_with_retries, load_config, exception_info, retry_on_s3_error
 
 iris.FUTURE.date_microseconds = True
 
@@ -49,7 +49,11 @@ def get_jasmin_s3():
         anon=False,
         secret=s3cfg['secret_key'],
         key=s3cfg['access_key'],
-        client_kwargs={'endpoint_url': 'http://hackathon-o.s3.jc.rl.ac.uk'}
+        client_kwargs={'endpoint_url': 'http://hackathon-o.s3.jc.rl.ac.uk'},
+        # Ride out short S3 wobbles inside botocore (adaptive mode also backs off when the store is loaded).
+        # Longer outages are handled a level up by util.retry_on_s3_error.
+        config_kwargs={'retries': {'max_attempts': 10, 'mode': 'adaptive'},
+                       'connect_timeout': 30, 'read_timeout': 120},
     )
 
 
@@ -85,7 +89,11 @@ def regrid_da_to_healpix(da, zoom, short_name, long_name, weights, drop_vars, ad
         regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay', zoom_level=zoom,
                                             add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
     else:
-        regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay_parallel', nproc=6, zoom_level=zoom,
+        # Use the CPUs the job actually asked for (SLURM_CPUS_PER_TASK), so requesting more CPUs speeds the
+        # parallel regrid up instead of leaving them idle. Falls back to 6 (the historical value) off SLURM.
+        nproc = int(os.environ.get('SLURM_CPUS_PER_TASK', 6))
+        regridder = LatLon2HealpixRegridder(weights=weights, method='easygems_delaunay_parallel', nproc=nproc,
+                                            zoom_level=zoom,
                                             add_cyclic=add_cyclic, regional=regional, regional_chunks=regional_chunks)
 
     # These have to be dropped before you cyclic pad *some* data arrays, or you will get a coord mismatch.
@@ -579,7 +587,8 @@ class UMProcessTasks:
 
         chunks = self.config['groups'][dim]['chunks']
         zarr_chunks = {'time': chunks[tgt_zoom][0], 'healpix_index': -1}
-        src_ds = xr.open_zarr(src_store, chunks=zarr_chunks)
+        src_ds = retry_on_s3_error(xr.open_zarr, src_store, chunks=zarr_chunks,
+                                   what=f'open {urls[src_zoom]}')
         regional = self.config['regional']
 
         # This will create a cluster with its specifications taken from the current machine.

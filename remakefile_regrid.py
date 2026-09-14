@@ -100,8 +100,8 @@ def create_inputs(config_key):
     inputs=create_inputs,
     matrix={'config_key': CONFIG_KEYS},
     uses={'UMProcessTasks': UMProcessTasks, 'OUTPUT_LOCATION': OUTPUT_LOCATION},
-    # Generates N2560 z10 weights (30-40G each) if they do not exist.
-    config={'slurm': {'mem': '100G', 'time': '24:00:00'}},
+    # Generates N2560 z10 weights (30-40G each) if they do not exist. Peak RSS 39.9G in the p4k run.
+    config={'slurm': {'mem': '64G', 'time': '24:00:00'}},
 )
 def create_stores(inputs, config_key):
     """Create empty zarr stores for all zooms. Refuses to overwrite existing stores (would delete data)."""
@@ -139,8 +139,11 @@ def regrid_inputs(config_key, date):
     depends_on=[create_stores],
     uses={'UMProcessTasks': UMProcessTasks, 'OUTPUT_LOCATION': OUTPUT_LOCATION},
     # qos=standard rejects >1 CPU per job.
-    config={'slurm': {'qos': 'high', 'mem': '100G', 'time': '10:00:00', 'cpus-per-task': 6,
-                      'array_throttle': 60}},
+    # mem: peak RSS 98.5G over 812 p4k tasks; at 100G, tasks packed onto a busy node thrashed in memory
+    # reclaim (10-30x slower) and 24 were lost to the walltime/OOM - see docs/p4k_production_run_plan_2026-09-11.md.
+    # array_throttle: 45 measured best (49 tasks/h vs 22 at 30 and 39-41 at 60).
+    config={'slurm': {'qos': 'high', 'mem': '128G', 'time': '10:00:00', 'cpus-per-task': 6,
+                      'array_throttle': 45}},
 )
 def regrid(inputs, config_key, date):
     import pandas as pd

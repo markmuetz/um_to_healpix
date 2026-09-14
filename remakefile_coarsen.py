@@ -110,6 +110,21 @@ def _coarsen_matrix(dim, zoom):
     return rows
 
 
+# Peak RSS measured over the p4k run (2026-09-13), rounded up with headroom: the 3d batches at z8/z7 read
+# ~16x what a z9 batch does and OOMed at the old flat 32G (peak 42.8G). See docs/p4k_production_run_plan_2026-09-11.md.
+COARSEN_MEM = {
+    ('2d', 9): '8G',    # peak 2.6G
+    ('3d', 9): '24G',   # peak 12.0G
+    ('3d', 8): '64G',   # peak 42.7G
+    ('3d', 7): '64G',   # peak 42.8G
+}
+COARSEN_MEM_DEFAULT = {'2d': '16G', '3d': '24G'}  # 2d z8-z0 peak <=6.0G; 3d z6-z0 peak <=10.7G
+
+
+def _coarsen_mem(dim, zoom):
+    return COARSEN_MEM.get((dim, zoom), COARSEN_MEM_DEFAULT[dim])
+
+
 def _make_coarsen_rule(dim, zoom, upstream):
     def matrix():
         return _coarsen_matrix(dim, zoom)
@@ -126,8 +141,9 @@ def _make_coarsen_rule(dim, zoom, upstream):
             '_time_index': _time_index,
             '_batch_len': _batch_len,
         },
-        # Peak RSS in the z9 test: 2d 2.2G, 3d 8.7G; lower zooms read more time steps per chunk.
-        config={'slurm': {'mem': '32G', 'array_throttle': 60}},
+        # These tasks are I/O bound on S3: they used 0.11 (2d) / 0.30 (3d) cores of the 12 previously
+        # requested, and aggregate throughput was S3-limited (~215 batches/h) regardless of concurrency.
+        config={'slurm': {'mem': _coarsen_mem(dim, zoom), 'cpus-per-task': 2, 'array_throttle': 60}},
     )
     def coarsen(config_key, start):
         import pandas as pd

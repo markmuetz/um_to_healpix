@@ -104,3 +104,40 @@ def test_task_log_writes_and_detaches(tmp_path):
     logger.info('outside')
     text = path.read_text()
     assert 'inside' in text and 'outside' not in text
+
+
+class TestRetryOnS3Error:
+    def test_returns_on_first_success(self):
+        from um_to_healpix.util import retry_on_s3_error
+        assert retry_on_s3_error(lambda x: x * 2, 21, base_sleep=0) == 42
+
+    def test_retries_then_succeeds(self):
+        from um_to_healpix.util import retry_on_s3_error
+        calls = []
+
+        def flaky():
+            calls.append(1)
+            if len(calls) < 3:
+                raise OSError('Read timeout on endpoint URL')
+            return 'ok'
+
+        assert retry_on_s3_error(flaky, base_sleep=0) == 'ok'
+        assert len(calls) == 3
+
+    def test_reraises_after_max_retries(self):
+        from um_to_healpix.util import retry_on_s3_error
+
+        def always_fails():
+            raise OSError('Read timeout on endpoint URL')
+
+        with pytest.raises(OSError):
+            retry_on_s3_error(always_fails, max_retries=3, base_sleep=0)
+
+    def test_does_not_swallow_other_errors(self):
+        from um_to_healpix.util import retry_on_s3_error
+
+        def bad():
+            raise ValueError('not an S3 problem')
+
+        with pytest.raises(ValueError):
+            retry_on_s3_error(bad, base_sleep=0)

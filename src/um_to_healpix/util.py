@@ -4,6 +4,7 @@ from functools import partial
 import asyncio
 import random
 import subprocess as sp
+import time
 from contextlib import contextmanager
 from pathlib import Path
 
@@ -35,6 +36,27 @@ import stratify
 #             logger.warning(f'sleeping for {timeout} s')
 #             await asyncio.sleep(timeout)
 #     raise Exception(f'failed to open {url} after {retries} retries')
+
+
+def retry_on_s3_error(fn, *args, what='S3 operation', max_retries=6, base_sleep=30, **kwargs):
+    """Call fn(*args, **kwargs), retrying S3/network failures with a growing sleep.
+
+    Reads and store-opens had no retries, so a momentary failure killed the task: the 2026-09-13 outages
+    (10 and 16 min) cost 38 coarsen batches this way. The default schedule (30, 60, 120, 240, 480 s + jitter,
+    ~15 min total) rides out an outage of that length. Writes have their own retries in
+    async_da_to_zarr_with_retries.
+    """
+    for attempt in range(max_retries):
+        try:
+            return fn(*args, **kwargs)
+        except (botocore.exceptions.ClientError, botocore.exceptions.ConnectionError,
+                botocore.exceptions.HTTPClientError, OSError) as e:
+            if attempt == max_retries - 1:
+                raise
+            timeout = max(0.0, base_sleep * 2 ** attempt + random.uniform(-5, 5))
+            logger.warning(f'{what} failed ({type(e).__name__}: {str(e)[:120]}); '
+                           f'retry {attempt + 1}/{max_retries - 1} in {timeout:.0f}s')
+            time.sleep(timeout)
 
 
 @contextmanager
