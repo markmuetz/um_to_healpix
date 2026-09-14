@@ -139,10 +139,13 @@ def regrid_inputs(config_key, date):
     depends_on=[create_stores],
     uses={'UMProcessTasks': UMProcessTasks, 'OUTPUT_LOCATION': OUTPUT_LOCATION},
     # qos=standard rejects >1 CPU per job.
-    # mem: peak RSS 98.5G over 812 p4k tasks; at 100G, tasks packed onto a busy node thrashed in memory
-    # reclaim (10-30x slower) and 24 were lost to the walltime/OOM - see docs/p4k_production_run_plan_2026-09-11.md.
+    # mem: measured peak is 60.1G with the per-step model-level interpolation (was 98.5G over 812 p4k tasks,
+    # where 100G left no headroom and tasks thrashed in memory reclaim on packed nodes, losing 24 to
+    # walltime/OOM). 96G is ~1.6x the peak and, just as importantly, caps SLURM at 16 of our tasks per 1.5TB
+    # node: the request is the only lever on packing density, and density drove duration in the p4k run
+    # (3-4 tasks/node 60 min, 8+ tasks/node 104 min). See docs/p4k_production_run_plan_2026-09-11.md.
     # array_throttle: 45 measured best (49 tasks/h vs 22 at 30 and 39-41 at 60).
-    config={'slurm': {'qos': 'high', 'mem': '128G', 'time': '10:00:00', 'cpus-per-task': 6,
+    config={'slurm': {'qos': 'high', 'mem': '96G', 'time': '10:00:00', 'cpus-per-task': 6,
                       'array_throttle': 45}},
 )
 def regrid(inputs, config_key, date):

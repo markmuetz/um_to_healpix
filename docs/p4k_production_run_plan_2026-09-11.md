@@ -273,7 +273,33 @@ already are (`util.async_da_to_zarr_with_retries`), and/or set `botocore.config.
 retries={'max_attempts': 10, 'mode': 'adaptive'})` in `get_jasmin_s3()`. This alone would have saved the 38
 batches lost on 2026-09-13, and would make the pipeline robust to the ~10–16 min outages seen twice in one day.
 
-## 3. Cut regrid's peak memory (~95 GB)
+## 3. Cut regrid's peak memory (~95 GB) - DONE 2026-09-14
+
+Implemented (commit 8957a2d): model-level variables are interpolated and regridded one time step at a time, in
+float32, so the (12, 25, 3841, 5120) float64 array (44 GB) never exists.
+
+| | before | after |
+|---|---|---|
+| peak RSS, whole task | 98.5 GB | **60.1 GB** |
+| duration (quiet node) | 27-53 min | 27 min |
+| memory request | 128 GB | **96 GB** (~1.6x peak; caps SLURM at 16 of our tasks per 1.5 TB node) |
+
+Validated against the prod p4k store for 2020-03-01: `tas`, `pr` and `ta` bit-identical; `cli` and `clw` differ
+by at most 2.1e-07 relative (float32 interpolation, agreed with the user), NaN patterns identical.
+
+What is left at 60 GB is mostly the *pressure-level* 3d variables, which are read whole from the .pp files
+(12 times x 25 levels x 19.7M points = 24 GB in float32) and are untouched by this change. Processing those per
+time step too would take the peak to ~20 GB, at the cost of more, smaller reads.
+
+**The memory request is also the packing lever.** Regrid uses 1.15 of its 6 CPUs (max 1.85), so CPU never limits
+how many tasks SLURM puts on a node - only memory does. Requesting close to the true peak would allow 24-32 of
+our tasks per node, and density is what drove duration in the p4k run (3-4/node 60 min; 8+/node 104 min). 96 GB
+is the compromise: enough headroom over the 60 GB peak, and a 16/node cap. Requesting less would need another
+way to control density.
+
+## (original notes)
+
+### Cutting regrid's peak memory
 
 The root cause of incident 1: at 16 GB/core the task cannot be scheduled without oversubscribing node memory.
 Process one group at a time and free cubes, and/or chunk the vertical interpolation instead of holding all model
