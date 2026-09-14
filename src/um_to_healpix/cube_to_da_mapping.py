@@ -1,5 +1,7 @@
 """Helper classes that allow for a declarative specification of how to map from iris cubes to xarray DataArrays
 """
+import os
+
 import xarray as xr
 
 from .util import model_level_to_pressure
@@ -7,9 +9,12 @@ from .util import model_level_to_pressure
 
 class DataArrayExtractor:
     """Extract a cube or DataArray from a set of input cubes."""
-    def __init__(self, p, z):
+    def __init__(self, p, z, nproc=None):
         self.p = p
         self.z = z
+        # Vertical interpolation is the dominant cost of a regrid task and is GIL-bound, so it needs processes,
+        # not the threads the regrid itself uses. Default to the CPUs the job asked for.
+        self.nproc = nproc if nproc is not None else int(os.environ.get('SLURM_CPUS_PER_TASK', 1))
 
     @staticmethod
     def extract_cubes(map_item, group_cubes):
@@ -78,7 +83,7 @@ class DataArrayExtractor:
         cube = self._combined_cube(map_item, group_cubes)
         ntime = min(cube.shape[0], self.p.shape[0])
         for i in range(ntime):
-            step = model_level_to_pressure(cube, self.p, self.z, time_indices=[i])
+            step = model_level_to_pressure(cube, self.p, self.z, time_indices=[i], nproc=self.nproc)
             yield self._to_da(step)
 
 

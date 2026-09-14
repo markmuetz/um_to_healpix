@@ -19,6 +19,7 @@ import json
 from pathlib import Path
 
 import pandas as pd
+from loguru import logger
 from remake import Remake, rule
 
 from um_to_healpix.um_process_tasks import UMProcessTasks
@@ -56,12 +57,34 @@ def _index_path(config_key):
     return config_module.pp_indexdir / f'{config_key}.json'
 
 
+def _read_index(index_path):
+    if not index_path.exists():
+        return {}
+    index = json.loads(index_path.read_text())
+    return {pd.Timestamp(d): [Path(p) for p in paths] for d, paths in index.items()}
+
+
 def _scan_dates_to_paths(config_key):
     """Scan the input dir for this config_key and (re)write its index. Plan time only."""
     cfg = PROCESSING_CONFIG[config_key]
     dates_to_paths = find_dyamond3_pp_dates_to_paths(cfg['basedir'], cfg.get('pp_glob', DEFAULT_PP_GLOB))
     index_path = _index_path(config_key)
     index_path.parent.mkdir(parents=True, exist_ok=True)
+    if not dates_to_paths:
+        # A vanished input dir otherwise looks exactly like "nothing to do": the index is silently emptied, the
+        # rule plans 0 tasks, every completed task drops out of `remake info`, and the coarsen rules (which gate
+        # on regrid-done dates) cascade to 0 as well. `remake run` then prints "Nothing to do" and exits 0.
+        # Happened for real on 2026-09-14 when the p4k .pp source was deleted (index rebuilt from the task logs).
+        # Keep the index so a finished run stays inspectable; a *run* still fails, on the missing input paths.
+        previous = _read_index(index_path)
+        if previous:
+            logger.warning(f'scan of {cfg["basedir"]} found no inputs for {config_key}, but its index lists '
+                           f'{len(previous)} dates - keeping the index. The inputs have been deleted or moved; '
+                           f'completed tasks stay visible, but nothing can be re-run until they are restored.')
+            _DATES_TO_PATHS[config_key] = previous
+            _SCANNED.add(config_key)
+            return previous
+        logger.warning(f'scan of {cfg["basedir"]} found no inputs for {config_key}')
     index = {str(date): [str(p) for p in paths] for date, paths in sorted(dates_to_paths.items())}
     tmp_path = index_path.with_suffix(f'.{config_key}.tmp')
     tmp_path.write_text(json.dumps(index, indent=1))
@@ -74,10 +97,9 @@ def _scan_dates_to_paths(config_key):
 def _dates_to_paths(config_key):
     """This process's view of the inputs: scanned this process, else the plan-time index, else a scan."""
     if config_key not in _DATES_TO_PATHS:
-        index_path = _index_path(config_key)
-        if index_path.exists():
-            index = json.loads(index_path.read_text())
-            _DATES_TO_PATHS[config_key] = {pd.Timestamp(d): [Path(p) for p in paths] for d, paths in index.items()}
+        index = _read_index(_index_path(config_key))
+        if index:
+            _DATES_TO_PATHS[config_key] = index
         else:
             _scan_dates_to_paths(config_key)
     return _DATES_TO_PATHS[config_key]
