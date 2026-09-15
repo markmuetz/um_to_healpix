@@ -34,7 +34,7 @@ pp_indexdir = Path('/work/scratch-nopw2/mmuetz/um2hp/pp_index')
 # Sims processed by the remake pipelines (remakefile_regrid.py/remakefile_coarsen.py); the others were
 # processed by um_slurm_control.py. Restricting this keeps plans fast and stops an unqueried `remake run`
 # from touching other sims' outputs.
-remake_config_keys = ['glm.n2560_RAL3p3_tuned_p4k']
+remake_config_keys = ['glm.n2560_CoMA9_p4k']
 
 # Defaults - can be overridden.
 slurm_config = dict(
@@ -413,6 +413,30 @@ global_configs[p4k_key] = {
             global_configs['glm.n2560_RAL3p3.tuned']['metadata']['simulation_description'] +
             ' This simulation is identical to glm.n2560_RAL3p3.tuned except that sea surface temperatures are '
             'uniformly increased by 4 K (+4K SST perturbation experiment).'),
+    },
+}
+
+
+# +4K SST perturbation with CoMA9 physics. Same input layout as the RAL3p3 +4K run
+# (glm/apver*/*.pp, no field.pp/ dir), same 812 12-hourly dates.
+# Copies the CoMA9 entry rather than the RAL3p3 one, so it inherits the CoMA9 groups (pr from instantaneous
+# total precipitation, no qs => 38 variables, 4 model-level) and the n2560e orography/landmask.
+# Checked 2026-09-15: all 38 selected variables sit on the two grids that already have weight files
+# (lat 3841/lon 0.000 and lat 3840/lon 0.035), so create_stores generates no new weights.
+coma9_p4k_key = 'glm.n2560_CoMA9_p4k'
+global_configs[coma9_p4k_key] = {
+    **global_configs['glm.n2560_CoMA9_hier_v2'],
+    'name': coma9_p4k_key,
+    'basedir': Path('/work/scratch-pw6/cscullio/data/DYAMOND3/n2560_CoMA9_p4k/glm'),
+    'pp_glob': 'apve*/*.pp',
+    'donepath_tpl': f'{coma9_p4k_key}/{output_vn}/{{task}}_{{date}}.done',
+    'coarsen_donepath_tpl': f'{coma9_p4k_key}/{output_vn}/coarsen/{{dim}}/z{{zoom}}/{{job_id}}.done',
+    'zarr_store_url_tpl': f's3://sim-data/{deploy}/{output_vn}/{coma9_p4k_key}/um.{{freq}}.hp_z{{zoom}}.zarr',
+    # No simulation_description: the glm.n2560_CoMA9_hier_v2 entry has none either, and inventing one would
+    # write unverified text into the published store attributes. Add the real CoMA9 wording, plus the +4K SST
+    # sentence, before this goes in the catalog.
+    'metadata': {
+        'simulation': coma9_p4k_key,
     },
 }
 

@@ -51,7 +51,7 @@ dependencies = [
 ]
 
 [project.scripts]
-um-slurm-control = "um_to_healpix.um_slurm_control:cli"
+um2hp = "um_to_healpix.cli:cli"
 um-process-tasks = "um_to_healpix.um_process_tasks:main"
 um-parse-slurm = "um_to_healpix.um_parse_slurm:main"
 

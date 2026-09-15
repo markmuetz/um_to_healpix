@@ -6,7 +6,7 @@ import pytest
 
 from um_to_healpix import um_process_tasks
 from um_to_healpix.um_process_tasks import UMProcessTasks
-from um_to_healpix.um_slurm_control import find_dyamond3_pp_dates_to_paths
+from um_to_healpix.pp_scan import find_dyamond3_pp_dates_to_paths
 
 STREAMS = ['apvera', 'apverb', 'apverc', 'apverd']
 

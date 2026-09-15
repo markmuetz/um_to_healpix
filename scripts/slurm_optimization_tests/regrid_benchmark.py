@@ -12,7 +12,7 @@ import pandas as pd
 import xarray as xr
 
 from um_to_healpix.latlon_to_healpix import gen_weights, LatLon2HealpixRegridder
-from um_to_healpix.um_slurm_control import find_dyamond3_pp_dates_to_paths
+from um_to_healpix.pp_scan import find_dyamond3_pp_dates_to_paths
 from um_to_healpix.util import load_config
 from um_to_healpix.cube_to_da_mapping import DataArrayExtractor
 from um_to_healpix.um_process_tasks import regrid_da_to_healpix, weights_filename

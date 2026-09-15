@@ -23,7 +23,7 @@ from loguru import logger
 from remake import Remake, rule
 
 from um_to_healpix.um_process_tasks import UMProcessTasks
-from um_to_healpix.um_slurm_control import DEFAULT_PP_GLOB, find_dyamond3_pp_dates_to_paths
+from um_to_healpix.pp_scan import DEFAULT_PP_GLOB, find_dyamond3_pp_dates_to_paths
 from um_to_healpix.util import load_config
 
 CONFIG_PATH = Path('config/hk26_config.py')
